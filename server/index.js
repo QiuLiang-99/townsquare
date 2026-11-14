@@ -366,10 +366,22 @@ server.on("upgrade", (req, socket, head) => {
 wss.on("connection", (ws, req) => {
   const { ns, pathname } = ws._ts;
   ws.isAlive = true;
+  ws._rtt = 0;
   ws.rateBucket = { count: 0, resetAt: Date.now() + 1000 };
+  // 连上立刻做一次协议层 ping，尽快拿到第一份 RTT（不用等 30 秒心跳）
+  try {
+    ws._pingSentAt = Date.now();
+    ws.ping();
+  } catch {}
 
   ws.on("pong", () => {
     ws.isAlive = true;
+    // 计算 WebSocket 协议层 RTT（服务端与这条连接之间的往返时延），供 app 层延迟显示用
+    if (ws._pingSentAt) {
+      const rtt = Date.now() - ws._pingSentAt;
+      if (rtt >= 0 && rtt < 30000) ws._rtt = rtt;
+      ws._pingSentAt = 0;
+    }
   });
 
   if (ns === "lobby") {
@@ -416,6 +428,7 @@ const heartbeat = setInterval(() => {
     }
     ws.isAlive = false;
     try {
+      ws._pingSentAt = Date.now();
       ws.ping();
     } catch {}
   });
@@ -546,6 +559,11 @@ function routeRoomMessage(ws, command, params, feedback) {
           }
         }
       });
+      // 回一个 feedback 帧给发送方自己：前端收到后会把自己这条消息也追加到本地
+      // 聊天记录里（私聊时"自己发的消息"才能显示出来），并清掉发送队列。
+      if (feedback !== undefined && feedback !== false) {
+        send(ws, "feedback", feedback);
+      }
       return;
     }
 
@@ -587,13 +605,28 @@ function routeRoomMessage(ws, command, params, feedback) {
 
     case "ping": {
       // params: [playerIdOrCount, "latency"]
-      // 服务端把玩家 ping 记录下来，并回 pong 让前端算延迟
+      // 客户端每 3 秒发一次 ping（第二项是字面量 "latency"），服务端负责把「其他节点」
+      // 各自的往返时延填成真实数字再转发，前端才能显示「与说书人的延迟 / 与玩家的延迟」。
       const [who, latency] = Array.isArray(params) ? params : [];
       const p = room.players.get(who);
       if (p) p.ping = Date.now();
       // 回 pong（前端 _handlePong 只置 _isAlive=true）
       send(ws, "pong", latency || 0);
-      // 如果是 host，顺便把玩家数分别回给 host/玩家由前端自行计数；这里不额外广播
+      const isSenderHost = room.host && room.host.ws === ws;
+      if (isSenderHost) {
+        // 说书人发起的 ping：转发给每个玩家，让玩家得到「与说书人的延迟」。
+        // 玩家侧 _handlePing 走 else if(latency) 分支，第一项必须是 0/空。
+        room.players.forEach((pl, pid) => {
+          const rtt = pl.ws && pl.ws._rtt ? pl.ws._rtt : 0;
+          send(pl.ws, "ping", [0, rtt]);
+        });
+      } else if (p) {
+        // 玩家发起的 ping：把该玩家测得的延迟转发给说书人，让说书人统计各玩家延迟。
+        const rtt = ws._rtt ? ws._rtt : 0;
+        if (room.host && room.host.ws) {
+          send(room.host.ws, "ping", [who, rtt]);
+        }
+      }
       return;
     }
 
@@ -645,13 +678,21 @@ function handleRequest(ws, room, meta, subCommand, playerId, subParams, feedback
       // 单纯由玩家自己刚连上而新建的空房间不算，避免误判为存在。
       send(ws, "allowJoin", !!(room.everHadHost || room.host));
       break;
-    case "deleteMessage":
-      // 消息已投递确认，无需服务端额外动作（前端据此删除本地队列）
-      // 回一个 feedback 帧确认
+    case "deleteMessage": {
+      // 前端在收到一条 chat 后，会发 request deleteMessage：[playerId, ["direct", 原始消息id]]。
+      // 设计约定：服务端要把这个「原始消息id」作为 feedback 回给房间（真正要的是回给发信人），
+      // 发信人收到 feedback 后 _deleteFromQueue(原始id) 才会把「自己发的这条」也落到本地聊天记录里。
+      // 否则发送方永远看不到自己发出的消息。
+      const origId = Array.isArray(subParams) ? subParams[1] : undefined;
+      if (origId !== undefined && origId !== null) {
+        broadcastRoom(room, "feedback", origId, null);
+      }
+      // 同时按需给请求方回执（保持通用 request 语义）
       if (feedback !== undefined && feedback !== false) {
         send(ws, "feedback", feedback);
       }
       break;
+    }
     default:
       // 未知 request：忽略
       break;

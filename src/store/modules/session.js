@@ -269,7 +269,12 @@ const mutations = {
   },
   updateChatReceived(state, {message, playerId}){
     if (state.isSpectator && playerId != state.stId) return;
-    const playerIndex = chatIndex(state, playerId);
+    let playerIndex = chatIndex(state, playerId);
+    if (playerIndex < 0) {
+      // 还没有这个会话的聊天记录就先建一个，避免发送方本地回显时找不到记录而报错/丢消息
+      Vue.set(state.chatHistory, state.chatHistory.length, {id: playerId, chat: []});
+      playerIndex = state.chatHistory.length - 1;
+    }
     const oldMessages = state.chatHistory[playerIndex]["chat"];
     Vue.set(state.chatHistory, playerIndex, {id: playerId, chat: [...oldMessages, message]})
   },
