@@ -1,6 +1,6 @@
 services:
   townsquare:
-    image: ${TOWNSQUARE_IMAGE:-townsquare:latest}
+    image: ${IMAGE_REF:-ghcr.io/nodisease/townsquare:main}
     container_name: townsquare
     restart: unless-stopped
     init: true

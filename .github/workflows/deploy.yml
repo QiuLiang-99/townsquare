@@ -16,13 +16,15 @@ concurrency:
 
 env:
   NODE_VERSION: "22"
-  IMAGE_NAME: townsquare
+  IMAGE_NAME: ghcr.io/nodisease/townsquare
 
 jobs:
   check:
     name: Check and test
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    permissions:
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -70,15 +72,18 @@ jobs:
           node server/test-ws.js
 
   docker:
-    name: Build and smoke-test image
+    name: Build, smoke-test, and publish image
     needs: check
     runs-on: ubuntu-latest
     timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build image
+      - name: Build image for smoke test
         env:
           SITE_URL: ${{ vars.SITE_URL || 'https://example.com' }}
           IMAGE_TAG: ${{ github.sha }}
@@ -111,85 +116,19 @@ jobs:
 
           docker exec townsquare-smoke node server/test-ws.js
 
-      - name: Save image artifact
-        if: github.ref == 'refs/heads/main'
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag and push tested image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           IMAGE_TAG: ${{ github.sha }}
         run: |
-          mkdir -p deploy-artifact
-          docker save "$IMAGE_NAME:$IMAGE_TAG" | gzip -9 > deploy-artifact/townsquare-image.tar.gz
-
-      - name: Upload image artifact
-        if: github.ref == 'refs/heads/main'
-        uses: actions/upload-artifact@v4
-        with:
-          name: townsquare-image-${{ github.sha }}
-          path: deploy-artifact/townsquare-image.tar.gz
-          retention-days: 7
-          if-no-files-found: error
-
-  deploy:
-    name: Deploy production
-    needs: docker
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    concurrency:
-      group: townsquare-production
-      cancel-in-progress: false
-    steps:
-      - name: Checkout deployment files
-        uses: actions/checkout@v4
-
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: townsquare-image-${{ github.sha }}
-          path: deploy-artifact
-
-      - name: Configure SSH
-        env:
-          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
-          DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-        run: |
-          if [ -z "$DEPLOY_SSH_KEY" ] || [ -z "$DEPLOY_KNOWN_HOSTS" ]; then
-            echo "::error::Missing DEPLOY_SSH_KEY or DEPLOY_KNOWN_HOSTS secret"
-            exit 1
-          fi
-
-          key_file="$RUNNER_TEMP/townsquare_deploy_key"
-          printf '%s\n' "$DEPLOY_SSH_KEY" > "$key_file"
-          chmod 600 "$key_file"
-          printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$RUNNER_TEMP/known_hosts"
-
-      - name: Upload release
-        env:
-          DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
-          DEPLOY_PORT: ${{ secrets.DEPLOY_PORT || '22' }}
-          DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
-          DEPLOY_PATH: ${{ secrets.DEPLOY_PATH || '/www/wwwroot/townsquare-deploy' }}
-        run: |
-          if [ -z "$DEPLOY_HOST" ] || [ -z "$DEPLOY_USER" ]; then
-            echo "::error::Missing DEPLOY_HOST or DEPLOY_USER secret"
-            exit 1
-          fi
-
-          remote="$DEPLOY_USER@$DEPLOY_HOST"
-          key_file="$RUNNER_TEMP/townsquare_deploy_key"
-          known_hosts="$RUNNER_TEMP/known_hosts"
-          ssh_options=(
-            -i "$key_file"
-            -o IdentitiesOnly=yes
-            -o StrictHostKeyChecking=yes
-            -o "UserKnownHostsFile=$known_hosts"
-          )
-
-          ssh -p "$DEPLOY_PORT" "${ssh_options[@]}" "$remote" "mkdir -p '$DEPLOY_PATH'"
-          scp -P "$DEPLOY_PORT" "${ssh_options[@]}" \
-            deploy-artifact/townsquare-image.tar.gz \
-            docker-compose.yml \
-            deploy/remote-deploy.sh \
-            deploy/server.env.example \
-            "$remote:$DEPLOY_PATH/"
-          ssh -p "$DEPLOY_PORT" "${ssh_options[@]}" "$remote" \
-            "cd '$DEPLOY_PATH' && chmod 700 remote-deploy.sh && DEPLOY_IMAGE_NAME='$IMAGE_NAME' ./remote-deploy.sh '$GITHUB_SHA'"
+          docker tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:main"
+          docker push "$IMAGE_NAME:$IMAGE_TAG"
+          docker push "$IMAGE_NAME:main"

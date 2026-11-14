@@ -1,0 +1,9 @@
+[Unit]
+Description=Pull and deploy the latest TownSquare container image
+Wants=network-online.target docker.service
+After=network-online.target docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/townsquare
+ExecStart=/opt/townsquare/update-image.sh
