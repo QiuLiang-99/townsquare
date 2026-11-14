@@ -137,7 +137,8 @@ export default new Vuex.Store({
       draw: false,
       voteHistory: false,
       input: false,
-      groupChat: false
+      groupChat: false,
+      quick: false
     },
     edition: editionJSONbyId.get("tb"),
     selectedEditions: {

@@ -322,6 +322,10 @@
               夜间顺序表
               <em>[N]</em>
             </li>
+            <li @click="toggleModal('quick')">
+              快捷唤醒短语
+              <em><font-awesome-icon icon="comment-dots" /></em>
+            </li>
             <li>
               <a href="https://botcgrimoire.top/manual" target="_blank">使用说明参考</a>
             </li>

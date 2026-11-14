@@ -41,6 +41,7 @@
     <InputModal ref="input"/>
     <GroupChatModal/>
     <VersionModal/>
+    <QuickWakeModal/>
     <Gradients />
     <!-- <span id="version">v{{ version }}</span> -->
   </div>
@@ -67,6 +68,7 @@ import GameStateModal from "@/components/modals/GameStateModal";
 import InputModal from "@/components/modals/InputModal.vue";
 import GroupChatModal from "./components/modals/GroupChatModal.vue";
 import VersionModal from "./components/modals/VersionModal.vue";
+import QuickWakeModal from "./components/modals/QuickWakeModal.vue";
 
 export default {
   components: {
@@ -87,6 +89,7 @@ export default {
     InputModal,
     GroupChatModal,
     VersionModal,
+    QuickWakeModal,
     Gradients
   },
   computed: {
