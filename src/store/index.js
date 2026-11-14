@@ -165,6 +165,10 @@ export default new Vuex.Store({
   },
   getters: {
     /**
+     * 全部剧本的 id -> { id, name } 映射，供大厅展示房间剧本名。
+     */
+    editionsList: () => Array.from(editionJSONbyId.values()).map(e => ({ id: e.id, name: e.name })),
+    /**
      * Return all custom roles, with default values and non-essential data stripped.
      * Role object keys will be replaced with a numerical index to conserve bandwidth.
      * @param roles

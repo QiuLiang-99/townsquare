@@ -107,7 +107,9 @@ export default {
     },
     confirmInput() {
       const allowEmpty = ["bootlegger"];
-      if (this.session.inputModal === "input" && !allowEmpty.includes(this.session.inputType) && (this.input.length <= 0 || this.input.some(item => item === ""))) {
+      // hostSession 的第 3 项（房间名）允许留空
+      const allowEmptyIndex = { hostSession: [2] };
+      if (this.session.inputModal === "input" && !allowEmpty.includes(this.session.inputType) && (this.input.length <= 0 || this.input.some((item, idx) => item === "" && !(allowEmptyIndex[this.session.inputType] || []).includes(idx)))) {
         this.close();
         return;
       }
@@ -137,6 +139,10 @@ export default {
             }
             if (!Number(numPlayers) || numPlayers <= 0) {
               this.warningMessage = "请输入正确人数！";
+              return;
+            }
+            if (this.input[2] && this.input[2].length > 30) {
+              this.warningMessage = "房间名不能超过30个字符！";
               return;
             }
           }

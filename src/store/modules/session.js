@@ -29,6 +29,7 @@ const state = () => ({
   playerId: "",
   playerName:"",
   playerAvatar: "default.webp",
+  sessionName: "",
   claimedSeat: -1,
   nomination: false,
   playerVotes: 1,
@@ -155,6 +156,13 @@ const mutations = {
   },
   setPlayerName(state, name){
     state.playerName = name;
+  },
+  setSessionName(state, name){
+    state.sessionName = typeof name === "string" ? name : "";
+  },
+  dissolveRoom(state){
+    // 仅作信号：socket 插件监听该 mutation 后通知服务端解散房间
+    state._dissolveTick = (state._dissolveTick || 0) + 1;
   },
   setDrawRoles(state, roles){
     if (!Array.isArray(roles)) return;

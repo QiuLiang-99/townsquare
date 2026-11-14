@@ -23,7 +23,8 @@
     ></video>
     <div class="backdrop"></div>
     <transition name="blur">
-      <Intro v-if="!players.length" @trigger="handleTrigger($event)"></Intro>
+      <WorldLobby v-if="!session.sessionId" @enterRoom="handleEnterRoom($event)"></WorldLobby>
+      <Intro v-else-if="!players.length" @trigger="handleTrigger($event)"></Intro>
       <TownInfo v-if="players.length && !session.nomination"></TownInfo>
       <Vote v-if="session.nomination"></Vote>
     </transition>
@@ -69,6 +70,7 @@ import InputModal from "@/components/modals/InputModal.vue";
 import GroupChatModal from "./components/modals/GroupChatModal.vue";
 import VersionModal from "./components/modals/VersionModal.vue";
 import QuickWakeModal from "./components/modals/QuickWakeModal.vue";
+import WorldLobby from "./components/WorldLobby.vue";
 
 export default {
   components: {
@@ -79,6 +81,7 @@ export default {
     Vote,
     ReferenceModal,
     Intro,
+    WorldLobby,
     TownInfo,
     TownSquare,
     Menu,
@@ -260,6 +263,9 @@ export default {
       if (typeof this.$refs.imageCropper[method] === 'function') {
         this.$refs.imageCropper[method]();
       }
+    },
+    handleEnterRoom(room) {
+      this.$refs.menu.enterRoomFromLobby(room);
     }
   }
 };
