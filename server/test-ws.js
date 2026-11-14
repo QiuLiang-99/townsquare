@@ -33,9 +33,9 @@ const lastOf = (ws, cmd) => [...ws.msgs].reverse().find((m) => m[0] === cmd);
   await wait(150);
   ok("host 收到 allowHost=true", (lastOf(host, "allowHost") || [])[1] === true);
 
-  // 3) lobby 收到 addRoom（在 host 建房后）
+  // 3) lobby 收到 addRoom（在 host 建房后）——载荷为房间对象，比对 channel
   await wait(100);
-  ok("lobby 收到 addRoom", (lobby.msgs.find((m) => m[0] === "addRoom") || [])[1] === CH);
+  ok("lobby 收到 addRoom", ((lobby.msgs.find((m) => m[0] === "addRoom") || [])[1] || {}).channel === CH);
 
   // 4) 第二个 host 用不同 auth 连接 -> 应被拒(alertPopup+close)
   const host2 = await conn(`${BASE}/ws/${CH}/hostpid2/host?auth=other`).catch(() => null);
