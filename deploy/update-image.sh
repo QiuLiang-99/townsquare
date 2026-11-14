@@ -22,7 +22,7 @@ if [ -n "$previous_id" ]; then
   docker tag "$previous_id" townsquare:previous
 fi
 
- echo "Checking $IMAGE_REF"
+echo "Checking $IMAGE_REF"
 compose pull townsquare
 new_id="$(docker image inspect --format '{{.Id}}' "$IMAGE_REF")"
 
@@ -67,4 +67,5 @@ else
   echo "Health check failed and no previous image is available to roll back to" >&2
 fi
 exit 1
+
 
