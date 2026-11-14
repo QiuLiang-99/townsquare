@@ -136,7 +136,8 @@ export default {
       } else {
         // this.$store.commit("session/setPlayerAvatar", this.croppedImage);
         try {
-          const response = await fetch("https://api.botcgrimoire.top/upload/avatar", {
+          const apiBase = window.__TS_API__ || window.location.origin;
+          const response = await fetch(apiBase + "/upload/avatar", {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json'

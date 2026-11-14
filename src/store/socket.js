@@ -1,8 +1,13 @@
 class LiveSession {
   constructor(store) {
-    this._wss = "wss://ws.botcgrimoire.top:443/ws/";
-    // this._wss = "ws://localhost:8081/"; // uncomment if using local server with NODE_ENV=development
-    // this._wss = "ws://192.168.1.2:8081/"; // uncomment if using local server with NODE_ENV=development
+    // 自建后端：默认连同一来源（页面所在的 host），路径 /ws/
+    // 如需指向其它服务器，设置 window.__TS_WS__ 或改此处。
+    this._wss =
+      window.__TS_WS__ ||
+      (window.location.protocol === "https:" ? "wss://" : "ws://") +
+        window.location.host +
+        "/ws/";
+    // 官方原值（保留备查）："wss://ws.botcgrimoire.top:443/ws/"
     this._socket = null;
     this._isSpectator = true;
     this._isAlive = true;
@@ -618,7 +623,7 @@ class LiveSession {
         this._store.commit("session/setSessionId", "");
         this._store.commit("session/setSpectator", false);
       }
-    }, 6000);
+    }, 15000);
   }
   
   /**
@@ -667,7 +672,7 @@ class LiveSession {
         this._store.commit("session/setSessionId", "");
         this._store.commit("session/setSpectator", false);
       }
-    }, 1000);
+    }, 15000);
   }
 
   /**
@@ -2307,9 +2312,13 @@ class LiveSession {
 
 class LiveLobby {
   constructor(store) {
-    this._wss = "wss://ws.botcgrimoire.top:443/lobby/";
-    // this._wss = "ws://localhost:8082/"; // uncomment if using local server with NODE_ENV=development
-    // this._wss = "ws://192.168.1.2:8082/"; // uncomment if using local server with NODE_ENV=development
+    // 自建后端：大厅默认连同一来源，路径 /lobby/
+    this._wss =
+      window.__TS_LOBBY__ ||
+      (window.location.protocol === "https:" ? "wss://" : "ws://") +
+        window.location.host +
+        "/lobby/";
+    // 官方原值（保留备查）："wss://ws.botcgrimoire.top:443/lobby/"
     this._socket = null;
     this._isSpectator = true;
     this._isAlive = true;

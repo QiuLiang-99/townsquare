@@ -360,8 +360,9 @@ export default new Vuex.Store({
   actions: {
     async fetchInit() {
       try {
-        // const response = await fetch('http://localhost:3000/api/init');
-        const response = await fetch('https://api.botcgrimoire.top/dynamic/init');
+        // 自建后端：默认同源 /dynamic/init；可用 window.__TS_API__ 覆盖主机
+        const apiBase = window.__TS_API__ || window.location.origin;
+        const response = await fetch(apiBase + '/dynamic/init');
         if (!response.ok) {
           throw new Error(`HTTP error! status: ${response.status}`);
         }

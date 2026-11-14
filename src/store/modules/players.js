@@ -237,7 +237,7 @@ const mutations = {
     } else if (fabled) {
       const fabledStoryteller = {
         "id": "storyteller",
-        "image": ("https://botcgrimoire.top/avatars/" + stImage),
+        "image": "/avatars/" + stImage,
         "firstNightReminder": "",
         "otherNightReminder": "",
         "reminders": [],
