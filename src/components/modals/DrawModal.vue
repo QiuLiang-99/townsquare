@@ -1,22 +1,24 @@
 <template>
-  <Modal v-if="modals.draw" @close="close" class="roles">
+  <Modal v-if="modals.draw" @close="close" name="draw" class="roles">
     <h3>
       请抽取角色
     </h3>
-    <ul class="tokens">
+    <!-- 牌数决定排几列（见 cols），整个牌子块居中，窗口本身也随内容收紧 -->
+    <ul class="tokens" :style="gridStyle">
       <li
         v-for="role in session.drawRoles"
         v-show="Object.keys(displayRole).length === 0"
         :key="role.id"
         @click="storeRole(role)"
-        :style="tokenWidth"
+        :style="cardStyle"
       >
-        <Token style="visibility: hidden" :role="role" />
+        <!-- 盲抽是给玩家看的：牌背与亮出的牌都不能带认知覆盖角标 -->
+        <Token style="visibility: hidden" :role="role" :show-corner="false" />
         <div class="life"></div>
       </li>
     </ul>
-    <ul v-if="Object.keys(displayRole).length !== 0">
-      <Token :role="displayRole" />
+    <ul class="reveal" v-if="Object.keys(displayRole).length !== 0">
+      <Token :role="displayRole" :show-corner="false" :style="revealStyle" />
     </ul>
     <div class="multiple">
       <span v-if="Object.keys(displayRole).length === 0">
@@ -54,15 +56,59 @@
 import { mapMutations, mapState } from "vuex";
 import Modal from "./Modal";
 import Token from "../Token";
+import { identityReminders } from "../../logic/reminders";
 
 export default {
   components: { Token, Modal },
   props: ["playerIndex"],
   computed: {
-    tokenWidth() {
-      const percentage = 0.06
-      const width = percentage * this.windowWidth;
-      return width >= 80 ? "width: 6vw" : "width: 80px";
+    /** 这一轮还没被抽走的牌数（= 要摆出来的牌数） */
+    drawCount() {
+      return (this.session.drawRoles || []).length;
+    },
+    /**
+     * 按数量决定排几列：先取平方根让行列接近，末行只剩 1 张时多给一列
+     * （7 张 → 4+3，不是 6+1 那种孤零零的一行）。
+     */
+    cols() {
+      const n = this.drawCount;
+      if (n <= 3) return Math.max(1, n);
+      let cols = Math.ceil(Math.sqrt(n));
+      if (n % cols === 1) cols += 1;
+      return Math.min(6, cols);
+    },
+    rows() {
+      return Math.ceil(this.drawCount / this.cols) || 1;
+    },
+    /** 牌的大小：宽高都要塞得下，牌少就大一点，牌多就小一点 */
+    cardSize() {
+      const gap = 12;
+      const byWidth = (this.windowWidth * 0.86 - gap * (this.cols - 1)) / this.cols;
+      const byHeight = (this.windowHeight * 0.62 - gap * (this.rows - 1)) / this.rows;
+      return Math.max(58, Math.min(126, Math.floor(Math.min(byWidth, byHeight))));
+    },
+    /**
+     * 牌背容器：宽度正好装下 cols 列。
+     * 保持全局的 flex 换行 + justify-content:center —— 这样每一行
+     * （包括末行剩下的牌）都会自动居中，不会出现 6+1 那种靠左的孤行。
+     */
+    gridStyle() {
+      return {
+        maxWidth: `${this.cols * this.cardSize + 12 * (this.cols - 1)}px`
+      };
+    },
+    cardStyle() {
+      return { width: `${this.cardSize}px` };
+    },
+    /** 亮出来的一张牌：跟着视口走，电脑端别大到出屏，手机端也别顶满整屏 */
+    revealSize() {
+      return Math.max(
+        150,
+        Math.floor(Math.min(this.windowWidth * 0.8, this.windowHeight * 0.6, 430))
+      );
+    },
+    revealStyle() {
+      return { width: `${this.revealSize}px` };
     },
     nonTravelerLength() {
       return this.players.filter(player => player.role.team !== "traveler").length;
@@ -129,7 +175,7 @@ export default {
     nextRole() {
       this.displayRole = {};
       this.drawingIndex = this.drawingIndex + 1;
-      while (this.drawingIndex < this.players.index && this.players[this.drawingIndex].role.team === 'traveler') this.drawingIndex = this.drawingIndex + 1;
+      while (this.drawingIndex < this.players.length && this.players[this.drawingIndex] && this.players[this.drawingIndex].role && this.players[this.drawingIndex].role.team === 'traveler') this.drawingIndex = this.drawingIndex + 1;
     },
     finishDraw() {
       const drawnRoles = [...this.drawnRoles, ...this.session.drawRoles];
@@ -142,6 +188,18 @@ export default {
           player,
           property: "role",
           value: drawnRoles[i]
+        });
+        // 新抽的一批角色：清掉上一局的死亡状态与提示标记。
+        // 认知覆盖的座位要自动带上真实身份的全局标记（酒鬼 → 「是酒鬼」）
+        this.$store.commit("players/update", {
+          player,
+          property: "isDead",
+          value: false
+        });
+        this.$store.commit("players/update", {
+          player,
+          property: "reminders",
+          value: identityReminders(drawnRoles[i], this.$store.state.roles)
         });
       }
       this.close();
@@ -162,10 +220,15 @@ export default {
 @import "../../vars.scss";
 
 ul.tokens {
+  /* 布局沿用全局 .modal ul 的 flex 换行 + 居中（每行都居中），
+     宽度由脚本按牌数算好锁住（max-width 内联），7 张就是 4+3 居中两行 */
+  align-content: center;
+  gap: 12px;
+  max-width: none;
+  margin: 0 auto;
   li {
     border-radius: 50%;
-    width: 120px;
-    margin: 5px;
+    margin: 0;
     transition: all 250ms;
     .buttons {
       display: none;

@@ -1,5 +1,5 @@
 <template>
-  <div class="token" @click="setRole" :class="[role.id]" 
+  <div class="token" @click="setRole" :class="[role.id, { 'hide-corner': !showCorner }]" 
   :style="tokenBackground"
   >
     <span
@@ -42,6 +42,7 @@
       </text>
     </svg>
     <div class="edition" :class="[`edition-${role.edition}`, role.team]"></div>
+    <div class="setup-tag" v-if="tag" :title="tagTitle">{{ tag }}</div>
     <div class="ability" v-if="role.ability">
       {{ role.ability }}
     </div>
@@ -65,6 +66,21 @@ export default {
     image: {
       type: String,
       default: ""
+    },
+    // 角色右上角的设置调整角标（如「外来者 +2」）：空串则不显示
+    tag: {
+      type: String,
+      default: ""
+    },
+    // 角标的悬停说明
+    tagTitle: {
+      type: String,
+      default: ""
+    },
+    // 是否显示右上角角标：盲抽 / 亮牌给玩家看时传 false，避免泄露身份
+    showCorner: {
+      type: Boolean,
+      default: true
     }
   },
   computed: {
@@ -209,6 +225,30 @@ export default {
     height: 30px;
     background-size: 100%;
     display: none;
+  }
+
+  // 设置调整角标：叠在角色牌右上角，标出这张牌实际带来的人数变化
+  // show-corner=false（盲抽/亮牌场景）时整块隐藏，避免把角色身份泄露给玩家
+  .setup-tag {
+    position: absolute;
+    top: -6px;
+    right: -6px;
+    z-index: 12;
+    padding: 1px 5px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.85);
+    border: 1px solid rgba(255, 175, 80, 0.75);
+    color: #ffcf8a;
+    font-size: 10px;
+    line-height: 1.35;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+
+  &.hide-corner {
+    .setup-tag {
+      display: none;
+    }
   }
 
   .ability {

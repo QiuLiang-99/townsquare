@@ -47,6 +47,7 @@ const faIcons = [
   "RedoAlt",
   "SearchMinus",
   "SearchPlus",
+  "SlidersH",
   "Skull",
   "Slash",
   "Square",
