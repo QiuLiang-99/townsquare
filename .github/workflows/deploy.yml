@@ -16,7 +16,7 @@ concurrency:
 
 env:
   NODE_VERSION: "22"
-  IMAGE_NAME: ghcr.io/nodisease/townsquare
+  IMAGE_NAME: ghcr.io/blood-on-the-computer/townsquare
 
 jobs:
   check:
@@ -117,7 +117,7 @@ jobs:
           docker exec townsquare-smoke node server/test-ws.js
 
       - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.repository == 'blood-on-the-computer/townsquare' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -125,7 +125,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Tag and push tested image
-        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        if: github.repository == 'blood-on-the-computer/townsquare' && github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
         env:
           IMAGE_TAG: ${{ github.sha }}
         run: |

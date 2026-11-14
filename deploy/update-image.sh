@@ -4,7 +4,7 @@ set -eu
 PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 cd "$PROJECT_DIR"
 
-IMAGE_REF="${IMAGE_REF:-ghcr.io/nodisease/townsquare:main}"
+IMAGE_REF="${IMAGE_REF:-ghcr.io/blood-on-the-computer/townsquare:main}"
 export IMAGE_REF
 
 if docker compose version >/dev/null 2>&1; then
