@@ -56,7 +56,6 @@
 import { mapMutations, mapState } from "vuex";
 import Modal from "./Modal";
 import Token from "../Token";
-import { identityReminders } from "../../logic/reminders";
 
 export default {
   components: { Token, Modal },
@@ -179,29 +178,16 @@ export default {
     },
     finishDraw() {
       const drawnRoles = [...this.drawnRoles, ...this.session.drawRoles];
-      let skip = 0;
-      for (let i=0; i<drawnRoles.length; i++) {
-        while (i+skip < this.players.length && this.players[i+skip] && this.players[i+skip].role && this.players[i+skip].role.team === "traveler") skip++;
-        const player = this.players[i+skip];
-        if (!player) continue;
-        this.$store.commit("players/update", {
-          player,
-          property: "role",
-          value: drawnRoles[i]
-        });
-        // 新抽的一批角色：清掉上一局的死亡状态与提示标记。
-        // 认知覆盖的座位要自动带上真实身份的全局标记（酒鬼 → 「是酒鬼」）
-        this.$store.commit("players/update", {
-          player,
-          property: "isDead",
-          value: false
-        });
-        this.$store.commit("players/update", {
-          player,
-          property: "reminders",
-          value: identityReminders(drawnRoles[i], this.$store.state.roles)
-        });
-      }
+      // 线下发牌也是新的一局：统一走 newGame 复位。
+      // newGame 会跳过旅行者、按座位顺序调用 pickRole，这里依次把抽到的角色发下去。
+      let i = 0;
+      this.$store.dispatch("newGame", {
+        pickRole: player => {
+          const role = drawnRoles[i];
+          i++;
+          return role || player.role;
+        }
+      });
       this.close();
     },
     close() {

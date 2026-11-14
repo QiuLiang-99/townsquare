@@ -265,6 +265,8 @@ export default {
         this.$store.commit("players/setFabled", { fabled });
       }
       this.isCustom = false;
+      // 换剧本 = 新开一局：清掉上一局的角色/生死/标记/夜序完成态/投票等临时数据
+      this.$store.dispatch("newGame");
     },
     parseStates(roles) {
       if (!roles || !roles.length) return;
@@ -311,6 +313,8 @@ export default {
     setHomeEdition(edition) {
       if (["tb", "bmr", "snv", "luf", "all", "custom_ankot"].includes(edition.id)) this.$store.commit("setStates", []);
       this.setEdition(edition, this.selectedEditions);
+      // 换剧本 = 新开一局：清掉上一局的角色/生死/标记/夜序完成态/投票等临时数据
+      this.$store.dispatch("newGame");
     },
     ...mapMutations(["toggleModal", "setEdition"])
   }

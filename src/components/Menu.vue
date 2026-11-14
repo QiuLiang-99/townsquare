@@ -1087,6 +1087,8 @@ export default {
         } else {
           this.$store.commit("players/clear", true)
         }
+        // 移除全部座位 = 新开一局：夜次回到第一夜
+        this.$store.commit("setDefaultNight");
       }
     },
     async clearRoles() {
