@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-DEPLOY_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-cd "$DEPLOY_DIR"
+PROJECT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$PROJECT_DIR"
 
 IMAGE_REF="${IMAGE_REF:-ghcr.io/nodisease/townsquare:main}"
 export IMAGE_REF
@@ -67,3 +67,4 @@ else
   echo "Health check failed and no previous image is available to roll back to" >&2
 fi
 exit 1
+
