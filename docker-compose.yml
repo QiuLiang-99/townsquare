@@ -1,6 +1,6 @@
 services:
   townsquare:
-    image: ${IMAGE_REF:-ghcr.io/nodisease/townsquare:main}
+    image: ${IMAGE_REF:-ghcr.io/blood-on-the-computer/townsquare:main}
     container_name: townsquare
     restart: unless-stopped
     init: true
