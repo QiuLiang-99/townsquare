@@ -69,8 +69,11 @@ export default {
     },
     nextConsecutiveTravelerNumber() {
       let count = 0;
-      for (let i = this.drawingIndex; i < this.players.length; i++) {
-        if (this.players[i].role?.team === 'traveler') {
+      const start = Math.max(0, this.drawingIndex || 0);
+      for (let i = start; i < this.players.length; i++) {
+        const player = this.players[i];
+        if (!player) break;
+        if (player.role && player.role.team === 'traveler') {
           count++;
         } else {
           break;
@@ -93,10 +96,23 @@ export default {
   },
   mounted(){
     window.addEventListener("resize", this.handleResize);
-    this.drawingIndex = this.players.findIndex(player => player.role.team !== 'traveler')
+    this.drawingIndex = Math.max(0, this.players.findIndex(player => player.role && player.role.team !== 'traveler'))
   },
   beforeDestroy(){
     window.removeEventListener("resize", this.handleResize);
+  },
+  watch: {
+    // 本组件在页面加载时即挂载，那时座位上可能还没有玩家或角色；
+    // 打开抽取窗口时重新定位起始座位并清空临时状态（原版缺此逻辑会导致越界/错位）
+    "modals.draw"(isOpen) {
+      if (!isOpen) return;
+      this.displayRole = {};
+      this.drawnRoles = [];
+      this.drawingIndex = Math.max(
+        0,
+        this.players.findIndex(player => player.role && player.role.team !== "traveler")
+      );
+    }
   },
   methods: {
     handleResize(){
@@ -119,9 +135,11 @@ export default {
       const drawnRoles = [...this.drawnRoles, ...this.session.drawRoles];
       let skip = 0;
       for (let i=0; i<drawnRoles.length; i++) {
-        while (this.players[i+skip].role.team === "traveler") skip++;
+        while (i+skip < this.players.length && this.players[i+skip] && this.players[i+skip].role && this.players[i+skip].role.team === "traveler") skip++;
+        const player = this.players[i+skip];
+        if (!player) continue;
         this.$store.commit("players/update", {
-          player: this.players[i+skip],
+          player,
           property: "role",
           value: drawnRoles[i]
         });

@@ -223,7 +223,7 @@ const mutations = {
     state.bluffs = bluffs;
   },
   setFabled(state, { index, fabled, stImage, stName, emptyFabled = false} = {}) {
-    if (!stImage) stImage = this.state.session.playerAvatar === "default.webp" ? "default_storyteller.webp" : this.state.session.playerAvatar;
+    if (!stImage) stImage = this.state.session.playerAvatar;
     if (!stName) stName = this.state.session.playerName;
     if (index !== undefined) {
       if (index == 0) return; // do not ever remove the first fabled i.e. storyteller
