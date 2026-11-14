@@ -8,7 +8,7 @@
     "build": "vue-cli-service build ./src/main.js",
     "lint": "vue-cli-service lint",
     "lint-ci": "vue-cli-service lint --no-fix --max-warnings=0",
-    "postbuild": "node generate-sitemap.js"
+    "postbuild": "node scripts/generate-sitemap.js"
   },
   "main": "App.vue",
   "dependencies": {

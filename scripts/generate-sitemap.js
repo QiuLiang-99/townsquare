@@ -3,7 +3,8 @@ const fs = require("fs");
 const path = require("path");
 
 const SITE = process.env.SITE_URL || "https://example.com";
-const dist = path.resolve(__dirname, "dist");
+// 脚本现在位于 scripts/ 下，dist 在项目根目录，需上跳一层
+const dist = path.resolve(__dirname, "..", "dist");
 if (!fs.existsSync(dist)) {
   console.log("[sitemap] dist 不存在，跳过");
   process.exit(0);
