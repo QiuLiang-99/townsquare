@@ -626,8 +626,8 @@ server.listen(PORT, () => {
 });
 
 // 优雅退出
-process.on("SIGINT", () => {
-  log("shutting down");
+function shutdown(signal) {
+  log(`${signal} received, shutting down`);
   clearInterval(heartbeat);
   wss.clients.forEach((c) => {
     try {
@@ -636,4 +636,7 @@ process.on("SIGINT", () => {
   });
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(0), 1500);
-});
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

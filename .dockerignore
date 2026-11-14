@@ -1,0 +1,17 @@
+.git
+.github
+.codegraph
+.idea
+node_modules
+dist
+deploy-artifact
+coverage
+*.log
+*.pem
+.env
+.env.*
+!.env.example
+server/avatars
+server/dynamic
+server/certs
+server/tools
