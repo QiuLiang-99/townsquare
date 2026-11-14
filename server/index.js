@@ -52,9 +52,17 @@ if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
 // ------------------------------------------------------------------ 内存状态
 /**
  * rooms[channel] = {
- *   host: { ws, playerId, connectedAt } | null,
- *   players: Map<playerId, { ws, ping, connectedAt, playerCount }>,
+ *   host: { ws, playerId, auth, connectedAt } | null,
+ *   players: Map<playerId, { ws, ping, connectedAt }>,
  *   createdAt,
+ *   everHadHost,
+ *   meta: {                      // 大厅展示用的房间元数据（说书人上报）
+ *     name: "房间名",            // 为空则前端用房间号兜底
+ *     stName: "说书人昵称",
+ *     edition: "tb",            // 剧本 id
+ *     maxPlayers: 12,           // 最大人数（建房时填的玩家人数）
+ *     playerCount: 12,          // 座位数（= maxPlayers）
+ *   },
  * }
  * 重启即失——与前端"本地 + 说书人为权威"的模型一致；如需持久化可外挂 SQLite。
  */
@@ -89,6 +97,28 @@ function cancelRoomCleanup(channel) {
     clearTimeout(existing);
     roomCleanupTimers.delete(channel);
   }
+}
+
+/**
+ * 立即解散房间：踢出所有玩家并通知，删除房间对象，广播大厅移除。
+ * 用于说书人主动"解散房间"（与宽限期回收不同，不需要等待重连）。
+ */
+function dissolveRoom(channel) {
+  const room = rooms.get(channel);
+  if (!room) return;
+  cancelRoomCleanup(channel);
+  const data = frame("alertPopup", "房间已被说书人解散。");
+  if (room.host) trySafeSend(room.host.ws, data);
+  room.players.forEach((p) => {
+    trySafeSend(p.ws, data);
+    try {
+      p.ws.close(4005, "room dissolved");
+    } catch {}
+  });
+  rooms.delete(channel);
+  roomCleanupTimers.delete(channel);
+  notifyLobbyRemove(channel);
+  log("room dissolved", channel);
 }
 
 // ------------------------------------------------------------------ 工具
@@ -148,16 +178,44 @@ function roomPlayerCount(room) {
 }
 
 // ------------------------------------------------------------------ 大厅广播
+/** 房间在"大厅"里是否可见：必须有过说书人，且不在宽限期清理流程里 */
+function roomVisible(room) {
+  return !!(room && room.everHadHost);
+}
+
+/** 生成一个房间的大厅展示项（供 setRooms / addRoom 下发） */
+function roomLobbyItem(channel, room) {
+  const m = room.meta || {};
+  return {
+    channel: String(channel),
+    players: roomPlayerCount(room),
+    name: m.name || "",
+    stName: m.stName || "",
+    edition: m.edition || "tb",
+    maxPlayers: m.maxPlayers || room.playerCount || 0,
+  };
+}
+
 function lobbySnapshot() {
   const list = [];
   rooms.forEach((room, channel) => {
-    list.push({ channel: String(channel), players: roomPlayerCount(room) });
+    if (!roomVisible(room)) return;
+    list.push(roomLobbyItem(channel, room));
   });
   return list;
 }
 
 function notifyLobbyAdd(channel) {
-  const data = frame("addRoom", String(channel));
+  const room = rooms.get(channel);
+  if (!room) return;
+  const data = frame("addRoom", roomLobbyItem(channel, room));
+  lobbyClients.forEach((c) => trySafeSend(c.ws, data));
+}
+/** 房间元数据（名字/剧本/人数等）变化时，向大厅广播最新该房间信息 */
+function notifyLobbyUpdate(channel) {
+  const room = rooms.get(channel);
+  if (!room || !roomVisible(room)) return;
+  const data = frame("updateRoom", roomLobbyItem(channel, room));
   lobbyClients.forEach((c) => trySafeSend(c.ws, data));
 }
 function notifyLobbyRemove(channel) {
@@ -383,13 +441,21 @@ function handleRoomConnection(ws, pathname, req) {
 
   let room = rooms.get(channel);
   const isNewRoom = !room;
+  // 房间对象此刻若还不存在（host 首次连入），下面会创建；但对"玩家加入发现房间不存在"的
+  // 检测必须放在创建之前，否则会误创建幽灵房。因此仅当 isHost 时才允许创建，见下。
 
   ws._room = { channel, playerId, isHost, auth };
 
   if (isHost) {
     // 说书人建房：只有 host 才真正创建房间对象（玩家连入不存在的房不会建幽灵房）
     if (!room) {
-      room = { host: null, players: new Map(), createdAt: Date.now(), everHadHost: false };
+      room = {
+        host: null,
+        players: new Map(),
+        createdAt: Date.now(),
+        everHadHost: false,
+        meta: {},
+      };
       rooms.set(channel, room);
     }
     cancelRoomCleanup(channel);
@@ -403,6 +469,8 @@ function handleRoomConnection(ws, pathname, req) {
     }
     room.host = { ws, playerId, auth, connectedAt: Date.now() };
     room.everHadHost = true;
+    room.hostLeftAt = null;
+    if (!room.meta) room.meta = {};
     log("host connect channel", channel, "playerId", playerId);
     // 客户端会主动 _request checkAllowHost；此处直接回允许（重复 host 已在上面拦截）
     send(ws, "allowHost", true);
@@ -417,6 +485,7 @@ function handleRoomConnection(ws, pathname, req) {
       }
     }
     if (isNewRoom) notifyLobbyAdd(channel);
+    else notifyLobbyUpdate(channel);
   } else {
     // 玩家/观众：房间必须已存在（有说书人建过）。不存在则直接拒绝，不建幽灵房。
     if (!room || !room.everHadHost) {
@@ -444,6 +513,7 @@ function handleRoomConnection(ws, pathname, req) {
     log("player connect channel", channel, "playerId", playerId, "players:", room.players.size);
     // 客户端会 _request checkAllowJoin；此处按房间是否存在(曾有过host)回答
     send(ws, "allowJoin", true);
+    notifyLobbyUpdate(channel);
   }
 }
 
@@ -499,6 +569,22 @@ function routeRoomMessage(ws, command, params, feedback) {
       return;
     }
 
+    case "roomMeta": {
+      // 说书人上报房间元数据：{ name, stName, edition, maxPlayers }
+      // 只允许 host 更新，且只接受白名单字段（防注入/防越权）。
+      if (!meta || !meta.isHost) return;
+      if (!params || typeof params !== "object") return;
+      const clean = {};
+      if (typeof params.name === "string") clean.name = params.name.slice(0, 60);
+      if (typeof params.stName === "string") clean.stName = params.stName.slice(0, 40);
+      if (typeof params.edition === "string") clean.edition = params.edition.slice(0, 32);
+      if (Number.isFinite(params.maxPlayers)) clean.maxPlayers = Math.max(0, Math.min(20, Math.floor(params.maxPlayers)));
+      room.meta = Object.assign({}, room.meta, clean);
+      // 房间若已在大厅可见，广播更新；否则（首次）按新增处理
+      if (room.everHadHost) notifyLobbyUpdate(meta.channel);
+      return;
+    }
+
     case "ping": {
       // params: [playerIdOrCount, "latency"]
       // 服务端把玩家 ping 记录下来，并回 pong 让前端算延迟
@@ -517,6 +603,14 @@ function routeRoomMessage(ws, command, params, feedback) {
       room.players.delete(playerId);
       // 通知 host 更新人数
       if (room.host) send(room.host.ws, "bye", playerId);
+      notifyLobbyUpdate(meta.channel);
+      return;
+    }
+
+    case "dissolveRoom": {
+      // 说书人主动解散房间 → 立刻从大厅移除并踢出所有玩家（不等宽限期）
+      if (!meta.isHost) return;
+      dissolveRoom(meta.channel);
       return;
     }
 
@@ -601,6 +695,7 @@ function onWsClose(ws) {
           room.players.delete(meta.playerId);
           if (room.host) send(room.host.ws, "bye", meta.playerId);
           log("player leave channel", meta.channel, meta.playerId, "players:", room.players.size);
+          notifyLobbyUpdate(meta.channel);
         }
       }
       // 空房间回收：说书人离开时给一个宽限期（等待其重连），宽限期内保留房间，

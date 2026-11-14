@@ -648,9 +648,9 @@ export default {
         inputType: "hostSession",
         inputModal: "input",
         inputData: {
-          name: ["请输入房间号", "请输入玩家人数"],
-          length: 2,
-          placeholder: [String(sessionPlaceholder), "12"]
+          name: ["请输入房间号", "请输入玩家人数", "请输入房间名（可留空）"],
+          length: 3,
+          placeholder: [String(sessionPlaceholder), "12", ""]
         }
       }).catch(() => {
         return null;
@@ -659,10 +659,12 @@ export default {
 
       const sessionId = Number(input[0]).toString();
       const numPlayers = Math.min(input[1], 20);
+      const sessionName = (input[2] || "").trim();
       if (sessionId) {
         this.$store.commit("session/clearVoteHistory", []);
         this.$store.commit("session/setSpectator", false);
         this.$store.commit("session/setSessionId", sessionId);
+        this.$store.commit("session/setSessionName", sessionName);
         this.$store.commit("players/clear");
         for(let i=0; i < numPlayers; i++){
           this.addPlayer();
@@ -935,6 +937,24 @@ export default {
         this.$store.commit("session/setSessionId", sessionId);
       }
     },
+    /** 世界大厅点击房间卡片：直接以玩家身份加入 */
+    enterRoomFromLobby(room) {
+      if (!room || room.channel === undefined) return;
+      if (!this.session.playerName) {
+        this.changeName().then(() => {
+          if (this.session.playerName) this._doJoinRoom(String(room.channel));
+        });
+        return;
+      }
+      this._doJoinRoom(String(room.channel));
+    },
+    _doJoinRoom(sessionId) {
+      if (!sessionId) return;
+      this.$store.commit("session/clearVoteHistory", []);
+      this.$store.commit("session/setSpectator", true);
+      this.$store.commit("toggleGrimoire", false);
+      this.$store.commit("session/setSessionId", sessionId);
+    },
     async leaveSession() {
       const confirm = await this.showInputModal({
         inputType: "confirm",
@@ -948,11 +968,16 @@ export default {
       if (confirm === null) return;
 
       if (confirm === true) {
+        // 说书人解散房间：先通知服务端立刻从大厅移除，避免大厅残留
+        if (!this.session.isSpectator && this.session.sessionId) {
+          this.$store.commit("session/dissolveRoom");
+        }
         // vacate seat upon leaving the room
         this.$store.commit("session/claimSeat", -1);
 
         this.$store.commit("session/setSpectator", false);
         this.$store.commit("session/setSessionId", "");
+        this.$store.commit("session/setSessionName", "");
         this.$store.commit("session/setIsHostAllowed", null);
         this.$store.commit("session/setIsJoinAllowed", null);
         

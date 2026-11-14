@@ -1,6 +1,7 @@
 const state = () => ({
   ping: 0,
-  rooms: null,
+  rooms: null, // 房间号字符串数组（向后兼容）
+  roomList: [], // 房间详情对象数组 { channel, players, name, stName, edition, maxPlayers }
   isReconnecting: false,
   allowReconnect: true
 });

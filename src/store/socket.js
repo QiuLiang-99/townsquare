@@ -10,6 +10,7 @@ class LiveSession {
     // 官方原值（保留备查）："wss://ws.botcgrimoire.top:443/ws/"
     this._socket = null;
     this._isSpectator = true;
+    this._isHost = false;
     this._isAlive = true;
     this._gamestate = [];
     this._store = store;
@@ -548,10 +549,19 @@ class LiveSession {
     this._store.commit("session/setPlayerCount", 0);
     this._store.commit("session/setPing", 0);
     this._isSpectator = this._store.state.session.isSpectator;
+    this._isHost = !this._isSpectator;
     if (this._store.state.session.claimedSeat >= 0) {
       this._store.commit("session/setTalking", {seatNum: this._store.state.session.claimedSeat, isTalking: false});
     }
     this._open(channel);
+  }
+
+  /**
+   * 说书人解散房间：通知服务端立刻从大厅移除该房间（不必等宽限期）。
+   */
+  dissolveRoom() {
+    if (this._isSpectator) return;
+    this._send("dissolveRoom", {});
   }
 
   /**
@@ -716,8 +726,27 @@ class LiveSession {
    * @param playerId
    * @param isLightweight
    */
+  /**
+   * 向服务端上报房间元数据（仅说书人），供世界大厅展示。
+   * 房间名 name 为空时由服务端/大厅用房间号兜底。
+   */
+  _sendRoomMeta() {
+    if (this._isSpectator) return;
+    const session = this._store.state.session;
+    const edition = this._store.state.edition || {};
+    const players = this._store.state.players.players || [];
+    this._send("roomMeta", {
+      name: session.sessionName || "",
+      stName: session.playerName || "",
+      edition: edition.id || "tb",
+      maxPlayers: players.length
+    });
+  }
+
   sendGamestate(playerId = "", isLightweight = false) {
     if (this._isSpectator) return;
+    // 先把房间元数据上报给服务端，供大厅展示（名字/说书人/剧本/人数）。
+    this._sendRoomMeta();
     this._gamestate = this._store.state.players.players.map(player => ({
       name: player.name,
       id: player.id,
@@ -2419,6 +2448,9 @@ class LiveLobby {
       case "addRoom":
         this.addRoom(params);
         break;
+      case "updateRoom":
+        this.updateRoom(params);
+        break;
       case "removeRoom":
         this.removeRoom(params);
         break;
@@ -2468,28 +2500,60 @@ class LiveLobby {
    */
   setRooms(params) {
     if (!Array.isArray(params)) return;
-    this._store.state.lobby.rooms = params;
+    if (!this._store.state.lobby.roomList) this._store.state.lobby.roomList = [];
+    this._store.state.lobby.roomList = params.slice();
+    // 兼容旧字段：只保留房间号字符串数组（InputModal / 建房去重等旧逻辑仍读它）
+    this._store.state.lobby.rooms = params.map(r => String(r.channel));
   }
 
   /**
    * Add rooms to the existing list
-   * @param params full list of all existing channels
+   * @param params a room descriptor { channel, players, name, stName, edition, maxPlayers }
    * @private
    */
   addRoom(params) {
-    if (typeof params != "string") return;
-    if (this._store.state.lobby.rooms.includes(params)) return;
-    this._store.state.lobby.rooms.push(params);
+    if (!params || typeof params !== "object" || params.channel === undefined) return;
+    const ch = String(params.channel);
+    if (!this._store.state.lobby.roomList) this._store.state.lobby.roomList = [];
+    const idx = this._store.state.lobby.roomList.findIndex(r => String(r.channel) === ch);
+    if (idx >= 0) {
+      this._store.state.lobby.roomList.splice(idx, 1, params);
+    } else {
+      this._store.state.lobby.roomList.push(params);
+    }
+    if (!this._store.state.lobby.rooms) this._store.state.lobby.rooms = [];
+    if (!this._store.state.lobby.rooms.includes(ch)) this._store.state.lobby.rooms.push(ch);
+  }
+
+  /**
+   * Update one room's descriptor (name/players/edition changed)
+   * @private
+   */
+  updateRoom(params) {
+    if (!params || typeof params !== "object" || params.channel === undefined) return;
+    const ch = String(params.channel);
+    if (!this._store.state.lobby.roomList) this._store.state.lobby.roomList = [];
+    const idx = this._store.state.lobby.roomList.findIndex(r => String(r.channel) === ch);
+    if (idx >= 0) {
+      this._store.state.lobby.roomList.splice(idx, 1, params);
+    } else {
+      this._store.state.lobby.roomList.push(params);
+      if (!this._store.state.lobby.rooms) this._store.state.lobby.rooms = [];
+      if (!this._store.state.lobby.rooms.includes(ch)) this._store.state.lobby.rooms.push(ch);
+    }
   }
 
   /**
    * Remove rooms from the existing list
-   * @param params full list of all existing channels
+   * @param params channel id (string)
    * @private
    */
   removeRoom(params) {
     if (typeof params != "string") return;
-    this._store.state.lobby.rooms = this._store.state.lobby.rooms.filter(room => room != params);
+    if (this._store.state.lobby.roomList) {
+      this._store.state.lobby.roomList = this._store.state.lobby.roomList.filter(r => String(r.channel) !== params);
+    }
+    this._store.state.lobby.rooms = (this._store.state.lobby.rooms || []).filter(room => room != params);
   }
 }
 
@@ -2510,6 +2574,18 @@ export default store => {
         } else {
           session.disconnect();
         }
+        break;
+      case "session/dissolveRoom":
+        // 说书人主动解散：先通知服务端移除房间，再断开（避免大厅残留）
+        session.dissolveRoom();
+        break;
+      case "session/setSessionName":
+        // 说书人修改房间名 → 实时同步到大厅
+        session._sendRoomMeta();
+        break;
+      case "session/setPlayerName":
+        // 说书人改昵称 → 同步说书人名称到大厅
+        if (session._isHost && state.session.sessionId) session._sendRoomMeta();
         break;
       case "session/claimSeat":
         session.claimSeat(payload);
@@ -2561,6 +2637,7 @@ export default store => {
         break;
       case "setEdition":
         session.sendEdition();
+        session._sendRoomMeta();
         break;
       case "setStates":
         session.sendStates();
@@ -2593,6 +2670,7 @@ export default store => {
       case "players/clear":
       case "players/add":
         session.sendGamestate("", true);
+        session._sendRoomMeta();
         break;
       case "players/update":
         if (payload.property === "pronouns") {
