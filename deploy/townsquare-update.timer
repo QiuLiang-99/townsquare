@@ -1,0 +1,10 @@
+[Unit]
+Description=Periodically check for a TownSquare image update
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

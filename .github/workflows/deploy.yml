@@ -1,27 +1,134 @@
-name: Deploy to GitHub Pages
+name: Docker CI/CD
+
 on:
+  pull_request:
   push:
     branches:
       - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docker-cicd-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  NODE_VERSION: "22"
+  IMAGE_NAME: ghcr.io/nodisease/townsquare
+
 jobs:
-  build-and-deploy:
-    concurrency: ci-${{ github.ref }}
+  check:
+    name: Check and test
     runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
     steps:
-      - name: Checkout 🛎️
-        uses: actions/checkout@v2
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v2
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
 
-      - name: Install and Build 🔧
+      - name: Install dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Check JavaScript and Vue files
+        run: npm run lint-ci
+
+      - name: Check server syntax
+        run: npm run check:server
+
+      - name: Build frontend
+        env:
+          SITE_URL: ${{ vars.SITE_URL || 'https://example.com' }}
+        run: npm run build
+
+      - name: Test HTTP and WebSocket server
         run: |
-          npm ci
-          npm run build
+          PORT=3000 ROOM_GRACE_MS=500 node server/index.js > /tmp/townsquare-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
 
-      - name: Deploy 🚀
-        uses: JamesIves/github-pages-deploy-action@v4.2.5
+          ready=false
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/healthz >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" != "true" ]; then
+            cat /tmp/townsquare-server.log
+            exit 1
+          fi
+
+          node server/test-ws.js
+
+  docker:
+    name: Build, smoke-test, and publish image
+    needs: check
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build image for smoke test
+        env:
+          SITE_URL: ${{ vars.SITE_URL || 'https://example.com' }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: docker build --build-arg "SITE_URL=$SITE_URL" -t "$IMAGE_NAME:$IMAGE_TAG" .
+
+      - name: Smoke-test production image
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker run -d \
+            --name townsquare-smoke \
+            -p 127.0.0.1:3000:3000 \
+            -e ROOM_GRACE_MS=500 \
+            "$IMAGE_NAME:$IMAGE_TAG"
+          trap 'docker rm -f townsquare-smoke >/dev/null 2>&1 || true' EXIT
+
+          ready=false
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3000/healthz >/dev/null; then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$ready" != "true" ]; then
+            docker logs townsquare-smoke
+            exit 1
+          fi
+
+          docker exec townsquare-smoke node server/test-ws.js
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
         with:
-          branch: gh-pages
-          folder: dist
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag and push tested image
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          docker tag "$IMAGE_NAME:$IMAGE_TAG" "$IMAGE_NAME:main"
+          docker push "$IMAGE_NAME:$IMAGE_TAG"
+          docker push "$IMAGE_NAME:main"

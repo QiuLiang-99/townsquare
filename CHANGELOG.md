@@ -1,6 +1,7 @@
 # Release Notes
 
 ### Version 3.4.0  (2026.11.14)
+- 增加 GHCR Docker 镜像发布及服务器定时拉取部署流程，支持健康检查失败后回滚
 - 角色配置“设置调整 / 认知覆盖”机制：角色配置界面按角色能力自动增减外来者/爪牙，并支持酒鬼、疯子等认知覆盖角色的伪装牌自动分配
 - 修复由于复盘模式新开一局后原本死亡的玩家仍然处于死亡状态无法投票的bug
 
@@ -316,3 +317,4 @@
 - Deus Ex Fiasco and Stormcatcher Fabled added / updated
 - Custom Reminder text looks better when there is a lot of text
 - added a README for the backend server
+

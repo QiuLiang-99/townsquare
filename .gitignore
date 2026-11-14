@@ -8,3 +8,8 @@ dist
 /server/tools
 # 运行时生成的上传头像，不入库
 /server/avatars
+.env
+.env.*
+!.env.example
+!deploy/server.env.example
+.codegraph
