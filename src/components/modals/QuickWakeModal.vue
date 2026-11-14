@@ -522,6 +522,8 @@ export default {
     }
     .qw-list-text {
       flex: 1;
+      min-width: 0;
+      word-break: break-word;
       line-height: 1.5;
     }
   }
@@ -543,6 +545,8 @@ export default {
   .qw-line {
     display: flex;
     flex-wrap: wrap;
+    min-width: 0;
+    max-width: 100%;
     align-items: center;
     justify-content: center;
     gap: 6px;
@@ -553,7 +557,8 @@ export default {
     line-height: 1.6;
   }
   .qw-text {
-    white-space: pre;
+    white-space: normal;
+    word-break: break-word;
   }
   .qw-chip {
     position: relative;
