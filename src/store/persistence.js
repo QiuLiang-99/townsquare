@@ -55,6 +55,9 @@ module.exports = store => {
   if (localStorage.getItem("audioThreshold")) {
     store.commit("setAudioThreshold", localStorage.getItem("audioThreshold"));
   }
+  if (localStorage.getItem("night")) {
+    store.commit("setNight", parseInt(localStorage.getItem("night"), 10));
+  }
   if (localStorage.getItem("isGrimoire")) {
     store.commit("toggleGrimoire", false);
     updatePagetitle(false);
@@ -291,6 +294,10 @@ module.exports = store => {
         break;
       case "setAudioThreshold":
         localStorage.setItem("audioThreshold", payload);
+        break;
+      case "setNight":
+      case "setDefaultNight":
+        localStorage.setItem("night", String(state.grimoire.night));
         break;
       case "setSelectedEditions":
         localStorage.setItem("selectedEditions", JSON.stringify(payload));

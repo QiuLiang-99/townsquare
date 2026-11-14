@@ -30,7 +30,9 @@
         class="night-order first"
         v-if="nightOrder.get(player).first && grimoire.isNightOrder"
       >
-        <em>{{ nightOrder.get(player).first }}.</em>
+        <em
+          :class="{ done: player.nightDone && player.nightDone.first }"
+        >{{ nightOrder.get(player).first }}.</em>
         <span v-if="player.role.firstNightReminder">{{
           player.role.firstNightReminder
         }}</span>
@@ -39,7 +41,9 @@
         class="night-order other"
         v-if="nightOrder.get(player).other && grimoire.isNightOrder"
       >
-        <em>{{ nightOrder.get(player).other }}.</em>
+        <em
+          :class="{ done: player.nightDone && player.nightDone.other }"
+        >{{ nightOrder.get(player).other }}.</em>
         <span v-if="player.role.otherNightReminder">{{
           player.role.otherNightReminder
         }}</span>
@@ -1316,6 +1320,12 @@ li.move:not(.from) .player .overlay svg.move {
 .player.dead .night-order em {
   color: #ddd;
   background: linear-gradient(180deg, rgba(0, 0, 0, 1) 0%, gray 100%);
+}
+
+/* 说书人在「夜间唤醒助手」里点完成后，座位牌上的夜序数字变绿 */
+.player .night-order em.done {
+  color: #0b3d16;
+  background: linear-gradient(180deg, #7bf27b 0%, #22c03a 100%);
 }
 
 /***** Reminder token *****/

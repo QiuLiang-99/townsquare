@@ -109,6 +109,10 @@
                 />
               </em>
             </li>
+            <li @click="toggleModal('nightWake')" v-if="players.length">
+              夜间唤醒助手
+              <em><font-awesome-icon icon="cloud-moon" /></em>
+            </li>
             <li v-if="players.length">
               缩放
               <em>

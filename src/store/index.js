@@ -122,7 +122,9 @@ export default new Vuex.Store({
       isForwardEvilInfo: false,
       zoom: 0,
       background: "",
-      audioThreshold: 150
+      audioThreshold: 150,
+      // 夜间唤醒助手：当前第几夜（1 = 首夜）。持久化到 localStorage，刷新不丢。
+      night: 1
     },
     modals: {
       version: false,
@@ -130,6 +132,7 @@ export default new Vuex.Store({
       fabled: false,
       gameState: false,
       nightOrder: false,
+      nightWake: false,
       reference: false,
       reminder: false,
       role: false,
@@ -221,6 +224,15 @@ export default new Vuex.Store({
     toggleNightOrder: toggle("isNightOrder"),
     toggleStatic: toggle("isStatic"),
     toggleNight: toggle("isNight"),
+    // 夜间唤醒助手的夜次：只接受 >=1 的整数
+    setNight({ grimoire }, val) {
+      const n = parseInt(val, 10);
+      if (Number.isFinite(n) && n >= 1) grimoire.night = n;
+    },
+    // 新开一局：夜次回默认第 1 夜
+    setDefaultNight({ grimoire }) {
+      grimoire.night = 1;
+    },
     toggleGrimoire: toggle("isPublic"),
     toggleImageOptIn: toggle("isImageOptIn"),
     toggleForwardEvilInfo:toggle("isForwardEvilInfo"),
