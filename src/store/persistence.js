@@ -1,6 +1,30 @@
 module.exports = store => {
   if (window.location.pathname != "/") return;
 
+  // 安全读取：遇到非法 JSON(如历史遗留的字符串 "undefined"/"null" 或损坏数据)
+  // 不抛异常，自动清除该键并返回 fallback，避免初始化崩溃导致整页白屏。
+  const safeParse = (key, fallback = undefined) => {
+    const raw = localStorage.getItem(key);
+    if (raw === null || raw === undefined || raw === "undefined" || raw === "null") {
+      if (raw === "undefined" || raw === "null") localStorage.removeItem(key);
+      return fallback;
+    }
+    try {
+      return JSON.parse(raw);
+    } catch (e) {
+      localStorage.removeItem(key);
+      return fallback;
+    }
+  };
+  // 安全写入：payload 为 undefined/null 时移除键，避免存入字符串 "undefined"
+  const safeSetJSON = (key, value) => {
+    if (value === undefined || value === null) {
+      localStorage.removeItem(key);
+    } else {
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+  };
+
   const updatePagetitle = isPublic =>
     // (document.title = `Blood on the Clocktower ${
     //   isPublic ? "Town Square" : "Grimoire"
@@ -35,70 +59,90 @@ module.exports = store => {
     store.commit("toggleGrimoire", false);
     updatePagetitle(false);
   }
-  if (localStorage.getItem("useOldOrder")) {
-    store.commit("session/setUseOldOrder", JSON.parse(localStorage.getItem("useOldOrder")));
+  {
+    const v = safeParse("useOldOrder");
+    if (v) store.commit("session/setUseOldOrder", v);
   }
-  if (localStorage.getItem("useOldRole")) {
-    store.commit("session/setUseOldRole", JSON.parse(localStorage.getItem("useOldRole")));
+  {
+    const v = safeParse("useOldRole");
+    if (v) store.commit("session/setUseOldRole", v);
   }
-  if (localStorage.getItem("isReview")) {
-    store.commit("session/setIsReview", JSON.parse(localStorage.getItem("isReview")));
+  {
+    const v = safeParse("isReview");
+    if (v !== undefined && v !== null) store.commit("session/setIsReview", v);
   }
-  if (localStorage.getItem("selectedEditions")) {
-    store.commit("setSelectedEditions", JSON.parse(localStorage.getItem("selectedEditions")));
+  {
+    const v = safeParse("selectedEditions");
+    if (v) store.commit("setSelectedEditions", v);
   }
-  if (localStorage.roles !== undefined) {
-    store.commit("setCustomRoles", JSON.parse(localStorage.roles));
-    store.commit("setEdition", { id: "custom" });
+  {
+    const v = safeParse("roles");
+    if (v !== undefined && v !== null) {
+      store.commit("setCustomRoles", v);
+      store.commit("setEdition", { id: "custom" });
+    }
   }
-  if (localStorage.getItem("states")) {
-    store.commit("setStates", JSON.parse(localStorage.states));
+  {
+    const v = safeParse("states");
+    if (v) store.commit("setStates", v);
   }
-  if (localStorage.getItem("teamsNames")) {
-    store.commit("setTeamsNames", JSON.parse(localStorage.teamsNames))
+  {
+    const v = safeParse("teamsNames");
+    if (v) store.commit("setTeamsNames", v)
   }
-  if (localStorage.getItem("firstNight")) {
-    store.commit("setFirstNight", JSON.parse(localStorage.firstNight))
+  {
+    const v = safeParse("firstNight");
+    if (v) store.commit("setFirstNight", v)
   }
-  if (localStorage.getItem("otherNight")) {
-    store.commit("setOtherNight", JSON.parse(localStorage.otherNight))
+  {
+    const v = safeParse("otherNight");
+    if (v) store.commit("setOtherNight", v)
   }
-  if (localStorage.edition !== undefined) {
-    // this will initialize state.roles for official editions
-    store.commit("setEdition", JSON.parse(localStorage.edition));
+  {
+    const v = safeParse("edition");
+    if (v !== undefined && v !== null) {
+      // this will initialize state.roles for official editions
+      store.commit("setEdition", v);
+    }
   }
-  if (localStorage.bluffs !== undefined) {
-    JSON.parse(localStorage.bluffs).forEach((role, index) => {
-      store.commit("players/setBluff", {
-        index,
-        role: store.state.roles.get(role) || {}
+  {
+    const v = safeParse("bluffs");
+    if (Array.isArray(v)) {
+      v.forEach((role, index) => {
+        store.commit("players/setBluff", {
+          index,
+          role: store.state.roles.get(role) || {}
+        });
       });
-    });
+    }
   }
   if (localStorage.getItem("playerProfileImage")) {
     localStorage.setItem("playerAvatar", localStorage.getItem("playerProfileImage"));
     localStorage.removeItem("playerProfileImage");
   }
-  if (localStorage.fabled !== undefined) {
-    store.commit("players/setFabled", {
-      // fabled: JSON.parse(localStorage.fabled).map(
-      //   fabled => store.state.fabled.get(fabled.id) || fabled
-      // )
-      fabled: JSON.parse(localStorage.fabled),
-      emptyFabled: true
-    });
+  {
+    const v = safeParse("fabled");
+    if (Array.isArray(v)) {
+      store.commit("players/setFabled", {
+        fabled: v,
+        emptyFabled: true
+      });
+    }
   }
-  if (localStorage.players) {
-    store.commit(
-      "players/set",
-      JSON.parse(localStorage.players).map(player => ({
-        ...player,
-        role:
-          store.state.roles.get(player.role) ||
-          store.getters.rolesJSONbyId.get(player.role) ||
-          {}
-      }))
-    );
+  {
+    const v = safeParse("players");
+    if (Array.isArray(v)) {
+      store.commit(
+        "players/set",
+        v.map(player => ({
+          ...player,
+          role:
+            store.state.roles.get(player.role) ||
+            store.getters.rolesJSONbyId.get(player.role) ||
+            {}
+        }))
+      );
+    }
   }
   /**** Session related data *****/
   if (localStorage.getItem("playerId")) {
@@ -124,57 +168,72 @@ module.exports = store => {
   if (localStorage.getItem("playerVotes")) {
     store.commit("session/setPlayerVotes", JSON.parse(localStorage.getItem("playerVotes")));
   }
-  if (localStorage.getItem("votes")) {
-    const votes = JSON.parse(localStorage.getItem("votes"));
-    votes.forEach(voteHistory => {
-      store.commit("session/addVotes", voteHistory);
-    })
-  }
-  if (localStorage.getItem("votesSelected")) {
-    const votesSelected = JSON.parse(localStorage.getItem("votesSelected"));
-    votesSelected.forEach(voteSelected => {
-      store.commit("session/addVoteSelected", voteSelected);
-    })
-  }
-  if (localStorage.getItem("customBootlegger")) {
-    const customBootlegger = JSON.parse(localStorage.getItem("customBootlegger"));
-    store.commit("session/setBootlegger", customBootlegger);
-  }
-  if (localStorage.getItem("chatHistory")) {
-    const chatHistory = JSON.parse(localStorage.getItem("chatHistory"));
-    chatHistory.forEach(player => {
-      store.commit("session/createChatHistory", player.id);
-      player.chat.forEach(message => {
-        store.commit("session/updateChatReceived", {message, playerId: player.id});
+  {
+    const votes = safeParse("votes");
+    if (Array.isArray(votes)) {
+      votes.forEach(voteHistory => {
+        store.commit("session/addVotes", voteHistory);
       })
-    })
+    }
   }
-  if (localStorage.getItem("groupChats")) {
-    const groupChats = JSON.parse(localStorage.getItem("groupChats"));
-    groupChats.forEach(group => {
-      store.commit("session/addGroupChat", {
-        chatId: group.id,
-        playerIds: group.playerIds,
-        keep: group.keep
+  {
+    const votesSelected = safeParse("votesSelected");
+    if (Array.isArray(votesSelected)) {
+      votesSelected.forEach(voteSelected => {
+        store.commit("session/addVoteSelected", voteSelected);
+      })
+    }
+  }
+  {
+    const customBootlegger = safeParse("customBootlegger");
+    if (customBootlegger !== undefined && customBootlegger !== null) {
+      store.commit("session/setBootlegger", customBootlegger);
+    }
+  }
+  {
+    const chatHistory = safeParse("chatHistory");
+    if (Array.isArray(chatHistory)) {
+      chatHistory.forEach(player => {
+        store.commit("session/createChatHistory", player.id);
+        player.chat.forEach(message => {
+          store.commit("session/updateChatReceived", {message, playerId: player.id});
+        })
+      })
+    }
+  }
+  {
+    const groupChats = safeParse("groupChats");
+    if (Array.isArray(groupChats)) {
+      groupChats.forEach(group => {
+        store.commit("session/addGroupChat", {
+          chatId: group.id,
+          playerIds: group.playerIds,
+          keep: group.keep
+        });
       });
-    });
+    }
   }
   if (localStorage.getItem("playerAvatar")) {
     store.commit("session/updatePlayerAvatar", localStorage.getItem("playerAvatar"));
   }
-  if (localStorage.getItem("secretVote")) {
-    store.commit("session/setSecretVote", JSON.parse(localStorage.getItem("secretVote")));
+  {
+    const v = safeParse("secretVote");
+    if (v !== undefined && v !== null) store.commit("session/setSecretVote", v);
   }
-  if (localStorage.getItem("isRole")) {
-    const isRole = JSON.parse(localStorage.getItem("isRole"));
-    const role = Object.keys(isRole)[0];
-    for(const property in isRole[role]) {
-      store.commit("session/setIsRole", {
-        role,
-        property,
-        value: isRole[role][property],
-        st: true
-      });
+  {
+    const isRole = safeParse("isRole");
+    if (isRole && typeof isRole === "object") {
+      const role = Object.keys(isRole)[0];
+      if (role && isRole[role] && typeof isRole[role] === "object") {
+        for(const property in isRole[role]) {
+          store.commit("session/setIsRole", {
+            role,
+            property,
+            value: isRole[role][property],
+            st: true
+          });
+        }
+      }
     }
   }
   // listen to mutations
@@ -328,7 +387,8 @@ module.exports = store => {
         }
         break;
       case "session/setStId":
-        localStorage.setItem("stId", payload);
+        if (payload) localStorage.setItem("stId", payload);
+        else localStorage.removeItem("stId");
         break;
       case "session/claimSeat":
         if (payload >= 0) {
@@ -338,7 +398,7 @@ module.exports = store => {
         }
         break;
       case "session/setPlayerVotes":
-        localStorage.setItem("playerVotes", JSON.stringify(payload));
+        safeSetJSON("playerVotes", payload);
         break;
       case "session/addVotes": {
         if (payload.save) {
@@ -376,7 +436,7 @@ module.exports = store => {
         break;
       }
       case "session/setBootlegger":
-        localStorage.setItem("customBootlegger", JSON.stringify(payload));
+        safeSetJSON("customBootlegger", payload);
         break;
       case "session/createChatHistory":
       case "session/updateChatSent":
@@ -441,10 +501,11 @@ module.exports = store => {
         }
         break;
       case "session/updatePlayerAvatar":
-        localStorage.setItem("playerAvatar", payload);
+        if (payload) localStorage.setItem("playerAvatar", payload);
+        else localStorage.setItem("playerAvatar", "default.webp");
         break;
       case "session/setSecretVote":
-        localStorage.setItem("secretVote", JSON.stringify(payload));
+        safeSetJSON("secretVote", payload);
         break;
       case "session/setUseOldOrder":
         if (payload) localStorage.setItem("useOldOrder", JSON.stringify(payload));
@@ -453,7 +514,7 @@ module.exports = store => {
         if (payload) localStorage.setItem("useOldRole", JSON.stringify(payload));
         break;
       case "session/setIsReview":
-        localStorage.setItem("isReview", JSON.stringify(payload));
+        safeSetJSON("isReview", payload);
         break;
       case "session/setIsRole":
         {
