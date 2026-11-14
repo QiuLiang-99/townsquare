@@ -48,23 +48,29 @@
               :title="isOptional(seg) ? '可留空' : '必填'"
               @click="active = slotKey(seg)"
             >
-              <span class="qw-chip-token" v-if="slotType(seg) === 'role'">
-                <Token
-                  v-if="picked[slotKey(seg)]"
-                  :role="picked[slotKey(seg)]"
-                  :show-corner="false"
-                />
-                <font-awesome-icon v-else icon="question" />
-              </span>
-              <span class="qw-chip-align" v-else-if="slotType(seg) === 'align' && picked[slotKey(seg)]" :class="picked[slotKey(seg)]">
+              <template v-if="slotType(seg) === 'role'">
+                <span class="qw-chip-token">
+                  <Token
+                    v-if="picked[slotKey(seg)]"
+                    :role="picked[slotKey(seg)]"
+                    :show-corner="false"
+                  />
+                  <font-awesome-icon v-else icon="question" />
+                </span>
+                <span class="qw-chip-name">
+                  {{ picked[slotKey(seg)] ? picked[slotKey(seg)].name : "点选角色" }}
+                </span>
+              </template>
+              <span
+                class="qw-chip-align"
+                v-else-if="slotType(seg) === 'align' && picked[slotKey(seg)]"
+                :class="picked[slotKey(seg)]"
+              >
                 <img :src="picked[slotKey(seg)] === 'good' ? goodIcon : evilIcon" alt="" />
                 {{ ALIGN_LABEL[picked[slotKey(seg)]] }}{{ seg.suffix || "" }}
               </span>
               <span class="qw-chip-num" v-else-if="slotType(seg) === 'num' && picked[slotKey(seg)]">
                 {{ picked[slotKey(seg)] }}
-              </span>
-              <span class="qw-chip-name" v-if="slotType(seg) === 'role'">
-                {{ picked[slotKey(seg)] ? picked[slotKey(seg)].name : "点选角色" }}
               </span>
               <span class="qw-chip-name" v-else-if="slotType(seg) === 'seat'">
                 {{ picked[slotKey(seg)] ? picked[slotKey(seg)] + "号玩家" : "玩家" }}
@@ -383,7 +389,7 @@ export default {
     /** 列表里一句话的纯文字预览（空位用 ⟦…⟧ 占位） */
     previewText(item) {
       return item.seg
-        .map(seg => (isSlot(seg) ? `⟦${slotLabel(slotType(seg))}⟧` : seg))
+        .map(seg => (isSlot(seg) ? `[${slotLabel(slotType(seg))}]` : seg))
         .join("");
     },
     openPhrase(item) {
