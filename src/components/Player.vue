@@ -31,7 +31,7 @@
         v-if="nightOrder.get(player).first && grimoire.isNightOrder"
       >
         <em
-          :class="{ done: player.nightDone && player.nightDone.first }"
+          :class="{ done: player.nightDone && player.nightDone['f' + grimoire.night] }"
         >{{ nightOrder.get(player).first }}.</em>
         <span v-if="player.role.firstNightReminder">{{
           player.role.firstNightReminder
@@ -42,7 +42,7 @@
         v-if="nightOrder.get(player).other && grimoire.isNightOrder"
       >
         <em
-          :class="{ done: player.nightDone && player.nightDone.other }"
+          :class="{ done: player.nightDone && player.nightDone['o' + grimoire.night] }"
         >{{ nightOrder.get(player).other }}.</em>
         <span v-if="player.role.otherNightReminder">{{
           player.role.otherNightReminder
@@ -1322,10 +1322,9 @@ li.move:not(.from) .player .overlay svg.move {
   background: linear-gradient(180deg, rgba(0, 0, 0, 1) 0%, gray 100%);
 }
 
-/* 说书人在「夜间唤醒助手」里点完成后，座位牌上的夜序数字变绿 */
+/* 说书人在「夜间唤醒助手」里点完成后，座位牌上的夜序数字变绿（照抄 botc 的处理） */
 .player .night-order em.done {
-  color: #0b3d16;
-  background: linear-gradient(180deg, #7bf27b 0%, #22c03a 100%);
+  background: linear-gradient(180deg, rgba(0, 0, 0, 1) 0%, #2f9e55 100%);
 }
 
 /***** Reminder token *****/

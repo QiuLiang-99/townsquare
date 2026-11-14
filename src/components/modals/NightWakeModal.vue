@@ -123,11 +123,6 @@ export default {
     isFirst() {
       return this.night <= 1;
     },
-    // 当前夜属于「首夜」还是「其他夜」——玩家的 nightDone 就按这个键存，
-    // 座位牌(Player.vue)读同一个键，点完成后座位上的夜序号会变绿
-    nightType() {
-      return this.isFirst ? "first" : "other";
-    },
     ...mapState(["roles", "modals", "grimoire", "session"]),
     ...mapState("players", ["players", "fabled"]),
     isNight() {
@@ -157,7 +152,7 @@ export default {
           order: ord,
           text: this.isFirst ? role.firstNightReminder : role.otherNightReminder,
           dead: !!player.isDead || this.hasDeathMark(player),
-          done: !!(player.nightDone && player.nightDone[this.nightType]),
+          done: !!(player.nightDone && player.nightDone[this.doneKey]),
           info: false
         });
       });
@@ -259,12 +254,14 @@ export default {
         else this.$set(this.infoDone, key, true);
         return;
       }
-      // 存到玩家对象的 nightDone[first|other] 上，与座位牌(Player.vue)共享同一份状态：
-      // 点完成后座位上的夜序数字会变绿
+      // 存到玩家对象的 nightDone 上，按「具体夜次」存键(doneKey = "f"/"o" + 夜次)，
+      // 与座位牌(Player.vue)共享同一份状态：点完成后座位上的夜序数字会变绿，
+      // 切换到别的一夜时读的是另一个键，旧的绿标自然不会残留。
       const player = row.player;
+      const key = this.doneKey;
       const cur = Object.assign({}, player.nightDone || {});
-      if (cur[this.nightType]) this.$delete(cur, this.nightType);
-      else cur[this.nightType] = true;
+      if (cur[key]) this.$delete(cur, key);
+      else cur[key] = true;
       this.$store.commit("players/update", {
         player,
         property: "nightDone",
@@ -272,11 +269,11 @@ export default {
       });
     },
     resetNight() {
-      // 玩家的进度：清掉本夜(first/other)的标记
+      // 玩家的进度：只清掉「本夜」的标记(doneKey 含具体夜次)
       this.players.forEach(player => {
-        if (player.nightDone && player.nightDone[this.nightType]) {
+        if (player.nightDone && player.nightDone[this.doneKey]) {
           const cur = Object.assign({}, player.nightDone);
-          this.$delete(cur, this.nightType);
+          this.$delete(cur, this.doneKey);
           this.$store.commit("players/update", {
             player,
             property: "nightDone",

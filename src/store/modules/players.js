@@ -1,3 +1,5 @@
+import Vue from "vue";
+
 const NEWPLAYER = {
   name: "",
   id: "",
@@ -15,7 +17,9 @@ const NEWPLAYER = {
   pronouns: "",
   newMessages: 0,
   chatGroup: "",
-  isTalking: false
+  isTalking: false,
+  // 夜间唤醒助手：该座位在首夜/其他夜的唤醒是否已完成（first/other）
+  nightDone: {}
 };
 
 const state = () => ({
@@ -145,7 +149,8 @@ const mutations = {
   update(state, { player, property, value }) {
     const index = state.players.indexOf(player);
     if (index >= 0) {
-      state.players[index][property] = value;
+      // 用 Vue.set 确保「新增属性」也能触发响应式（如 nightDone 这类后加的字段）
+      Vue.set(state.players[index], property, value);
     }
     if (player.id === this.state.session.playerId) {
       this.commit("players/selfUpdate", {player, property, value});
