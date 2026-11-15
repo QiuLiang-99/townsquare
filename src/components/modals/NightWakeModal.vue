@@ -132,16 +132,22 @@ export default {
       return (this.isFirst ? "f" : "o") + this.night;
     },
     rows() {
-      const order = this.$store.getters["players/nightOrder"];
+      // 与官方 NightOrderModal 一致：直接用角色自身的 firstNight / otherNight 原始值判断，
+      // 不再依赖 players/nightOrder getter（它返回的是排序后的「下标」，
+      // 自定义角色没配进 firstNightOrder 时 indexOf 得 -1、Math.max(-1,0)=0 会被当作不行动，
+      // 于是自定义角色一律显示“不需要唤醒”）。
       const rows = [];
       // 首夜且人数 > 6 时，插入「爪牙信息 / 恶魔信息」两条（与夜间顺序表一致）
       const withInfo = this.isFirst && this.players.length > 6;
       this.players.forEach((player, index) => {
         const role = player.role;
         if (!role || !role.id) return;
-        const info = order.get(player) || { first: 0, other: 0 };
-        const ord = this.isFirst ? info.first : info.other;
-        if (!ord) return; // 0 = 本夜不行动
+        // 官方逻辑：首夜看 firstNight、其他夜看 otherNight，>0 即本夜行动；
+        // 旅行者只有真的在场(有座位玩家)时才上榜。
+        const raw = this.isFirst ? role.firstNight : role.otherNight;
+        let ord = Number(raw) || 0;
+        if (!ord) return; // 本夜不行动（原始值为 0 / 未定义）
+        if (this.isFirst && role.team === "traveler" && !player.id) return;
         const key = this.doneKey + "-p-" + index;
         rows.push({
           key,

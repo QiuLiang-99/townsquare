@@ -32,6 +32,7 @@
       >
         <em
           :class="{ done: player.nightDone && player.nightDone['f' + grimoire.night] }"
+          :title="player.role.firstNightReminder || ''"
         >{{ nightOrder.get(player).first }}.</em>
         <span v-if="player.role.firstNightReminder">{{
           player.role.firstNightReminder
@@ -43,6 +44,7 @@
       >
         <em
           :class="{ done: player.nightDone && player.nightDone['o' + grimoire.night] }"
+          :title="player.role.otherNightReminder || ''"
         >{{ nightOrder.get(player).other }}.</em>
         <span v-if="player.role.otherNightReminder">{{
           player.role.otherNightReminder
