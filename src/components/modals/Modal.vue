@@ -3,13 +3,13 @@
     <div class="modal-backdrop" @click="closeCheck">
       <div
         class="modal"
-        :class="{ maximized: isMaximized, [name]: true }"
+        :class="{ maximized: isMaximized || forceMaximized, [name]: true }"
         role="dialog"
         aria-labelledby="modalTitle"
         aria-describedby="modalDescription"
         @click.stop=""
       >
-        <div class="top-right-buttons" v-if="name != 'input'">
+        <div class="top-right-buttons" v-if="name != 'input' && !forceMaximized">
           <font-awesome-icon
             @click="isMaximized = !isMaximized"
             class="top-right-button"
@@ -44,6 +44,11 @@ export default {
     dismissible: {
       type: Boolean,
       default: true
+    },
+    // 强制最大化（铺满全屏），且不显示最大化/最小化按钮（用于盲抽等全场强制窗口）
+    forceMaximized: {
+      type: Boolean,
+      default: false
     }
   },
   data: function() {

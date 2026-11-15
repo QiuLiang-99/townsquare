@@ -856,6 +856,31 @@ function routeRoomMessage(ws, command, params, feedback) {
       return;
     }
 
+    case "blindDraw": {
+      // 盲抽角色：仅说书人可开启/关闭盲抽，转发全房间并缓存供重连补发。
+      // 隐私：角色内容（roles）只留在说书人本地，绝不能随广播下发，否则玩家可反推他人身份。
+      // 只广播 active + 槽位数量 count（=roles.length），以及已有的 taken 记录。
+      if (!meta.isHost) return;
+      const active = !!(params && params.active);
+      const count = active ? (Number(params && params.count) || 0) : 0;
+      room.blindDraw = {
+        active,
+        count,
+        taken: active && Array.isArray(params && params.taken) ? params.taken : []
+      };
+      broadcastRoom(room, "blindDraw", { active, count, taken: room.blindDraw.taken }, ws);
+      return;
+    }
+
+    case "blindDrawTaken": {
+      // 盲抽角色：某个槽位被抽走 → 转发「槽位 -> 抽取者」给全房间（不含抽到什么角色），缓存供重连补发
+      if (!meta.isHost) return;
+      room.blindDrawTaken = Array.isArray(params) ? params : [];
+      if (room.blindDraw) room.blindDraw.taken = room.blindDrawTaken;
+      broadcastRoom(room, "blindDrawTaken", room.blindDrawTaken, ws);
+      return;
+    }
+
     default: {
       if (isQuickWakeCommand(command)) {
         sendQuickWakeError(ws, params && (params.id || params.wakeId), "forbidden", "快捷唤醒消息不可广播。");

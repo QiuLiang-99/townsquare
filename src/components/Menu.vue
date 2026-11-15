@@ -254,6 +254,10 @@
                 发送角色
                 <em><font-awesome-icon icon="theater-masks"/></em>
               </li>
+              <li @click="openBlindDraw">
+                盲抽角色
+                <em><font-awesome-icon icon="hand-paper"/></em>
+              </li>
               <li @click="distributeTypeAsk">
                 发送角色类型
               </li>
@@ -508,7 +512,7 @@ import { nextTick } from 'vue';
 
 export default {
   computed: {
-    ...mapState(["grimoire", "session", "lobby", "edition", "channels", "selectedEditions", "buildVersion"]),
+    ...mapState(["grimoire", "session", "lobby", "edition", "channels", "selectedEditions", "buildVersion", "roles"]),
     ...mapState("players", ["players"]),
     formattedTime() {
       const minutes = Math.floor(this.session.timer / 60);
@@ -703,6 +707,54 @@ export default {
       this.distributingGrimoire = false;
       this.distributingTypes = false;
       this.distributing = !this.distributing;
+    },
+    /**
+     * 盲抽角色：从「配置角色」已勾选的角色里构建牌堆（按 selected 数量展开，应用认知覆盖），
+     * 校验落座非旅行者人数 == 角色数量后开启盲抽窗口。
+     */
+    openBlindDraw() {
+      if (this.session.isSpectator) return;
+      // 收集所有已勾选角色：state.roles 是 Map，role.selected 即勾选数量
+      const allRoles = this.roles ? Array.from(this.roles.values()) : [];
+      // 认知覆盖：未上场但带 coverOf 的伪装牌，按 coverOf.id 建索引
+      const coverMap = {};
+      allRoles.forEach(role => {
+        if (role.coverOf && !role.selected) coverMap[String(role.coverOf.id)] = role;
+      });
+      const pool = [];
+      allRoles.forEach(role => {
+        const count = role.selected || 0;
+        if (!count) return;
+        const cover = coverMap[String(role.id)];
+        const card = cover
+          ? Object.assign({}, cover, {
+              selected: 1,
+              coverOf: { id: role.id, name: role.name, team: role.team, image: role.image || "" }
+            })
+          : role;
+        for (let i = 0; i < count; i++) pool.push(card);
+      });
+      const nonTravelers = this.players.filter(p => p.role && p.role.team !== "traveler").length;
+      if (pool.length === 0) {
+        this.$root.$emit("notify", "还没有配置角色，请先在「配置角色」里选好本局角色。", "err");
+        return;
+      }
+      if (pool.length !== nonTravelers) {
+        this.$root.$emit(
+          "notify",
+          `已配置 ${pool.length} 个角色，但落座的非旅行者玩家有 ${nonTravelers} 人，数量不一致，无法开始盲抽。`,
+          "err"
+        );
+        return;
+      }
+      // 打乱
+      const shuffled = pool
+        .map(a => [Math.random(), a])
+        .sort((a, b) => a[0] - b[0])
+        .map(a => a[1]);
+      this.$store.commit("session/setBlindDrawRoles", shuffled);
+      this.$store.commit("session/setBlindDrawActive", true);
+      this.toggleModal("blindDraw");
     },
     distributeRoles(confirm) {
       this.$nextTick(() => {

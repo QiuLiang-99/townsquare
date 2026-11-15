@@ -35,6 +35,7 @@
     <FabledModal />
     <RolesModal />
     <DrawModal />
+    <BlindDrawModal />
     <ReferenceModal />
     <NightOrderModal />
     <NightWakeModal />
@@ -60,6 +61,7 @@ import Menu from "./components/Menu";
 import ImageCropper from "./components/ImageCropper";
 import RolesModal from "./components/modals/RolesModal";
 import DrawModal from "./components/modals/DrawModal";
+import BlindDrawModal from "./components/modals/BlindDrawModal";
 import EditionModal from "./components/modals/EditionModal";
 import Intro from "./components/Intro";
 import ReferenceModal from "./components/modals/ReferenceModal";
@@ -96,6 +98,7 @@ export default {
     EditionModal,
     RolesModal,
     DrawModal,
+    BlindDrawModal,
     InputModal,
     GroupChatModal,
     VersionModal,

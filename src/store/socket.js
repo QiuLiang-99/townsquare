@@ -570,6 +570,18 @@ class LiveSession {
       case "reviewRevealed":
         this._handleSetReviewRevealed(params);
         break;
+      case "blindDraw":
+        this._handleBlindDraw(params);
+        break;
+      case "blindDrawTaken":
+        this._handleBlindDrawTaken(params);
+        break;
+      case "blindDrawPick":
+        this._handleBlindDrawPick(params);
+        break;
+      case "blindDrawReveal":
+        this._handleBlindDrawReveal(params);
+        break;
       case "setTalking":
         this._handleSetTalking(params);
         break;
@@ -906,6 +918,10 @@ class LiveSession {
         isUseOldRole: session.isUseOldRole,
         isReview: session.isReview,
         reviewRevealed: session.isReview ? session.reviewRevealed : [],
+        // 盲抽只下发槽位数量与已抽记录（槽位->谁抽走），绝不下发角色内容，避免泄露身份
+        blindDrawActive: session.blindDrawActive,
+        blindDrawCount: session.blindDrawActive ? session.blindDrawRoles.length : 0,
+        blindDrawTaken: session.blindDrawActive ? session.blindDrawTaken : [],
         nomination: session.nomination,
         votingSpeed: session.votingSpeed,
         lockedVote: session.lockedVote,
@@ -966,6 +982,9 @@ class LiveSession {
       isUseOldRole,
       isReview,
       reviewRevealed,
+      blindDrawActive,
+      blindDrawCount,
+      blindDrawTaken,
       nomination,
       votingSpeed,
       votes,
@@ -1032,6 +1051,10 @@ class LiveSession {
       this._store.commit("session/setUseOldRole", isUseOldRole);
       this._store.commit("session/setIsReview", isReview);
       this._store.commit("session/setReviewRevealed", isReview ? reviewRevealed : []);
+      // 盲抽：玩家端只需 active + 槽位数量 + 已抽记录（角色内容不下发，靠 host 私发）
+      this._store.commit("session/setBlindDrawActive", !!blindDrawActive);
+      this._store.commit("session/setBlindDrawCount", blindDrawActive ? (blindDrawCount || 0) : 0);
+      this._store.commit("session/setBlindDrawTaken", blindDrawActive ? (blindDrawTaken || []) : []);
       const nominatedPlayer = nomination.length ? players[nomination[1]] : null;
       this._store.commit("session/nomination", {
         nomination,
@@ -2035,6 +2058,135 @@ class LiveSession {
   }
 
   /**
+   * 盲抽角色：说书人开启/关闭盲抽，广播给全房间。
+   * payload = { active: true/false, count: 槽位数量 }（不含角色内容）
+   */
+  sendBlindDraw(payload){
+    if (this._isSpectator) return;
+    this._send("blindDraw", payload);
+  }
+
+  _handleBlindDraw(payload){
+    if (!this._isSpectator) return;
+    const active = !!(payload && payload.active);
+    this._store.commit("session/setBlindDrawActive", active);
+    if (active) {
+      this._store.commit("session/setBlindDrawCount", payload && payload.count ? payload.count : 0);
+    }
+  }
+
+  /**
+   * 盲抽角色：玩家抽走某个槽位 → 直接告诉说书人（点对点），不广播。
+   * 说书人收到后登记谁抽走哪个槽位，再把该槽位的角色私发回该玩家。
+   */
+  sendBlindDrawPick(slot){
+    // 玩家发起：玩家端 _isSpectator 为 true，这里不能因 isSpectator 而拦截
+    if (!Number.isFinite(slot)) return;
+    this._sendDirect("host", "blindDrawPick", {
+      slot,
+      playerId: this._store.state.session.playerId
+    });
+  }
+
+  // 说书人收到玩家的抽牌请求：登记已抽 + 私发角色给该玩家 + 广播已抽记录
+  _handleBlindDrawPick(pick){
+    if (this._isSpectator) return; // 仅说书人处理
+    if (!pick || typeof pick.slot !== "number") return;
+    const roles = this._store.state.session.blindDrawRoles || [];
+    const slot = pick.slot;
+    if (slot < 0 || slot >= roles.length) return;
+    const taken = this._store.state.session.blindDrawTaken || [];
+    // 已被别人抽走 → 忽略
+    if (taken.some(t => t.slot === slot)) return;
+    const playerId = pick.playerId;
+    const players = this._store.state.players.players || [];
+    const seat = players.findIndex(p => p.id && p.id === playerId);
+    if (seat < 0) return;
+    const name = players[seat].name || "";
+    const newTaken = taken.concat([{ slot, seat, name, playerId }]);
+    // commit 会触发 store.subscribe → sendBlindDrawTaken 广播给全房间
+    this._store.commit("session/setBlindDrawTaken", newTaken);
+    // 私发该槽位的角色给抽到的玩家
+    this._sendDirect(playerId, "blindDrawReveal", { slot, role: roles[slot] });
+  }
+
+  _handleBlindDrawReveal(reveal){
+    if (!this._isSpectator) return;
+    if (!reveal || typeof reveal.slot !== "number") return;
+    // 记录本玩家抽到的槽位与角色（本地），供渲染"自己抽到的牌"
+    this._store.commit("session/setBlindDrawMyPick", { slot: reveal.slot, role: reveal.role });
+  }
+
+  /**
+   * 盲抽角色：玩家抽走某一张牌后，广播"槽位 -> 谁抽走了"给全房间（不泄露抽到什么角色）。
+   * 说书人本地也维护同一份 blindDrawTaken。
+   */
+  sendBlindDrawTaken(taken){
+    if (this._isSpectator) return;
+    this._send("blindDrawTaken", taken);
+  }
+
+  _handleBlindDrawTaken(taken){
+    if (!this._isSpectator) return;
+    this._store.commit("session/setBlindDrawTaken", taken);
+  }
+
+  /**
+   * 说书人点「分配已抽取角色至魔典 / 随机分配剩余角色」。
+   * 按抽取顺序把每个槽位的角色分给对应座位；未抽完的剩余槽位随机补齐给未抽到的非旅行者座位。
+   */
+  blindDrawFinish(){
+    if (this._isSpectator) return;
+    const session = this._store.state.session;
+    const roles = (session.blindDrawRoles || []).slice();
+    const taken = (session.blindDrawTaken || []).slice();
+    const players = this._store.state.players.players || [];
+    // 每个座位的角色（按 slots 索引）
+    const seatRole = {}; // seatIndex -> role
+    const usedSlots = new Set();
+    // 1) 已抽的：按抽取记录把 slot 的角色给对应座位
+    taken.forEach(rec => {
+      if (rec.slot >= 0 && rec.slot < roles.length) {
+        const seatIdx = players.findIndex(p => p.id && p.id === rec.playerId);
+        if (seatIdx >= 0) {
+          seatRole[seatIdx] = roles[rec.slot];
+          usedSlots.add(rec.slot);
+        }
+      }
+    });
+    // 2) 剩余角色池：未被抽走的槽位
+    const remainingRoles = [];
+    for (let i = 0; i < roles.length; i++) {
+      if (!usedSlots.has(i)) remainingRoles.push(roles[i]);
+    }
+    // 打乱
+    for (let i = remainingRoles.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [remainingRoles[i], remainingRoles[j]] = [remainingRoles[j], remainingRoles[i]];
+    }
+    // 3) 未抽到的非旅行者座位按顺序补齐（含空座位：剩余角色要摆满魔典，不仅发给已落座玩家）
+    let ri = 0;
+    players.forEach((p, idx) => {
+      if (seatRole[idx]) return;
+      if (p.role && p.role.team === "traveler") return;
+      if (ri < remainingRoles.length) {
+        seatRole[idx] = remainingRoles[ri];
+        ri++;
+      }
+    });
+    // 4) 先广播「盲抽关闭」，再发牌。
+    //    原因：setBlindDrawActive(false) 会触发 gamestate 广播，若放到 newGame 之后，
+    //    这次 gs 里的 blindDrawActive 仍是 true，可能晚于关闭帧到达玩家端，导致玩家窗口被重新打开、
+    //    永远关不掉。这里先关闭（此时 roles/taken 已快照到本地变量，关闭清空不影响发放），
+    //    再执行 newGame 发牌，玩家端只会收到 active:false 的关闭帧。
+    this._store.commit("session/setBlindDrawActive", false);
+    // 5) 走 newGame 统一复位并逐座位发牌
+    this._store.dispatch("newGame", {
+      pickRole: (player, idx) => seatRole[idx] || player.role
+    });
+  }
+
+  /**
    * Set talking status to true to enable glowing animation
    * Send this update to all clients in the channel
    */
@@ -2868,6 +3020,22 @@ export default store => {
       case "session/setReviewRevealed":
         // 说书人点开/收起某个座位 → 广播给全房间（仅说书人触发；玩家端仅接收）
         session.sendReviewRevealed(payload);
+        break;
+      case "session/setBlindDrawActive":
+        // 说书人开启/关闭盲抽 → 广播 active + 槽位数量（不下发角色内容）
+        session.sendBlindDraw({ active: payload, count: state.session.blindDrawCount });
+        break;
+      case "session/setBlindDrawTaken":
+        // 有玩家抽走某张牌 → 广播牌堆下标->抽取者（仅说书人侧触发）
+        session.sendBlindDrawTaken(payload);
+        break;
+      case "session/blindDrawPick":
+        // 玩家点了某个槽位 → 私发说书人请求该槽位的角色（payload 即槽位下标数字）
+        session.sendBlindDrawPick(payload);
+        break;
+      case "session/blindDrawFinish":
+        // 说书人点了「分配/随机补齐」→ 执行发牌
+        session.blindDrawFinish();
         break;
       // case "session/setBootlegger":
       //   session.setBootlegger(payload);
