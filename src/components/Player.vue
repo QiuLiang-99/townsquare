@@ -1,5 +1,5 @@
 <template>
-  <li :style="zoom">
+  <li :style="zoom" :class="{ revealed: revealed }">
     <div
       ref="player"
       class="player"
@@ -10,13 +10,17 @@
           'no-vote': player.isVoteless,
           'vote-yes': session.votes[index],
           'vote-lock': voteLocked,
-          talking: player.isTalking && player.id
+          talking: player.isTalking && player.id,
+          revealed: revealed
         },
         player.role.team
       ]"
     >
       <div class="seatNum">{{ players.indexOf(player) + 1 }}</div>
       <div class="newMessage" v-show="player.newMessages > 0">{{ player.newMessages }}</div>
+
+      <!-- 隐藏模式下的整座点击层：确保点座位任意位置都立即翻牌/盖上 -->
+      <div v-if="grimoire.isPublic" class="public-click-catcher" @click.stop="toggleStatus()"></div>
 
       <div class="shroud" @click="toggleStatus()"></div>
       <div class="life" @click="toggleStatus()"></div>
@@ -378,7 +382,8 @@ export default {
       menuTop: null,
       menuHeight: null,
       menuNewTop: null,
-      votes: 0
+      votes: 0,
+      revealed: false
     };
   },
   mounted(){
@@ -403,6 +408,12 @@ export default {
           this.resize();
         })
       },
+    },
+    'grimoire.isPublic': {
+      handler(val) {
+        // 退出隐藏模式时，所有座位恢复默认（盖住）
+        if (!val) this.revealed = false;
+      }
     }
   },
   methods: {
@@ -437,6 +448,11 @@ export default {
       return `translate(${iconShiftX}px, ${iconShiftY}px) scale(${scaleValue})`;
     },
     clickSetRole(){
+      // 隐藏模式：点击角色牌也用于翻转揭示/盖上该玩家角色
+      if (this.grimoire.isPublic) {
+        this.revealed = !this.revealed;
+        return;
+      }
       if (this.session.isSpectator && !this.player.id){
         this.claimSeat();
         return;
@@ -468,17 +484,8 @@ export default {
     },
     toggleStatus() {
       if (this.grimoire.isPublic) {
-        if (!this.player.isDead) {
-          this.updatePlayer("isDead", true);
-          if (this.player.isMarked) {
-            this.updatePlayer("isMarked", false);
-          }
-        } else if (this.player.isVoteless) {
-          this.updatePlayer("isVoteless", false);
-          this.updatePlayer("isDead", false);
-        } else {
-          this.updatePlayer("isVoteless", true);
-        }
+        // 隐藏模式：点击玩家 = 翻转揭示/盖上该玩家角色（不再切换生死/遗言票）
+        this.revealed = !this.revealed;
       } else {
         this.updatePlayer("isDead", !this.player.isDead);
         if (this.player.isMarked) {
@@ -870,6 +877,44 @@ export default {
 
 #townsquare.public .circle .token {
   transform: perspective(400px) rotateY(-180deg);
+}
+
+/* 隐藏模式下：整座透明点击层，保证点座位任意位置都立即响应，且盖在角色牌之上 */
+#townsquare.public .player .public-click-catcher {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 20;
+  cursor: pointer;
+}
+
+/* 隐藏模式下，被点开(revealed)的座位：完全复制“非隐藏”状态的翻牌（token 正面、life 翻到背面），
+   即把该座位从 public 态单独还原，效果与点“显示”按钮一致；
+   注意：取消整盘翻转用的“按座位号递增的级联延迟”，单个揭示应立即翻转。 */
+#townsquare.public .player.revealed .token {
+  transform: perspective(400px) rotateY(0deg);
+  transition-delay: 0s !important;
+}
+#townsquare.public .player.revealed .life {
+  transform: perspective(400px) rotateY(180deg);
+  transition-delay: 0s !important;
+}
+
+/* unveiled 座位把微光遮罩掀开，露出完整角色牌 */
+#townsquare.public .player.revealed .shroud {
+  transform: perspective(400px) rotateX(0deg);
+  transition-delay: 0s !important;
+  pointer-events: none;
+}
+
+/* 被揭示的座位：角色身边的 reminder 小标记恢复显示（其它未揭示座位仍隐藏）；
+   保持 pointer-events:none —— 此模式为只读，禁止误触增删标记。
+   注意：reminder 是 <li> 的直接子元素（不在 .player 内），所以选择器用 li.revealed */
+#townsquare.public li.revealed .reminder:not(.add) {
+  opacity: 1;
+  pointer-events: none;
 }
 
 /****** Player choice icons *******/
