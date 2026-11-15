@@ -87,13 +87,6 @@
         </li>
       </ul>
     </div>
-    <a v-if="!!session.sessionId && (!session.isSpectator || !!session.isHostAllowed || !!session.isJoinAllowed)"
-    href="https://botcgrimoire.top/donation/" target="_blank"
-    class="donation"
-    >
-      <span>支持</span>
-    </a>
-
     <div v-if="session.isSpectator && isRole.length > 0"
         class="is-role">
       <font-awesome-icon 
@@ -145,9 +138,6 @@
       <div class="floating-window">
         <span class="floating-text">{{ floatingNotice }}</span>
       </div>
-    </div>
-    <div id="version">
-      <a href="https://beian.miit.gov.cn/" target="_blank">浙ICP备2024109577号-2</a>
     </div>
     <div id="copyright">
       <span>
@@ -840,97 +830,6 @@ export default {
   }
 }
 
-#townsquare > .donation {
-  position: absolute;
-  top: calc(50px + 16vh);
-  left: 10px;
-  height: 2rem;
-  width: 4rem;
-  z-index: 50;
-  text-decoration: none;
-
-  // Outer border style
-  border: 2px solid #B67D43; /* A dark, textured border for the outer frame */
-  background-color: rgba(0, 0, 0, 1);
-  padding: 10px 20px;
-  color: inherit;
-  cursor: pointer;
-
-  span {
-    position: absolute;
-    top: 0.05rem;
-    left: 0.7rem;
-    white-space: nowrap;
-    font-size: 1.2rem;
-  }
-
-  box-shadow: 0 0 5px #B67D43; 
-  animation: glow-cycle 605s linear; /* 10m duration */
-  animation-delay: 1s;
-}
-// The keyframe animation for 10 minutes oscillation
-@keyframes glow-cycle {
-  0% { 
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-  
-  0.0826% { // Peak of the 1st pulse
-    box-shadow: 0 0 20px #DAB060;
-    border-color: #DAB060;
-  }
-  
-  0.165% { // End of the 1st pulse
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-  
-  0.247% { // Peak of the 2nd pulse
-    box-shadow: 0 0 20px #DAB060;
-    border-color: #DAB060;
-  }
-  
-  0.33% { // End of the 2nd pulse
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-  
-  0.413% { // Peak of the 3rd pulse
-    box-shadow: 0 0 20px #DAB060;
-    border-color: #DAB060;
-  }
-  
-  0.495% { // End of the 3rd pulse
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-  
-  0.578% { // Peak of the 4th pulse
-    box-shadow: 0 0 20px #DAB060;
-    border-color: #DAB060;
-  }
-  
-  0.66% { // End of the 4th pulse
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-
-  0.743% { // Peak of the 5th pulse
-    box-shadow: 0 0 20px #DAB060;
-    border-color: #DAB060;
-  }
-  
-  0.826% { // End of the 5th pulse, which is 5 seconds in
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-  
-  100% { // The rest of the 10-minute duration is spent here
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-}
-
 #townsquare.public > .bluffs {
   opacity: 0;
   transform: scale(0.1);
@@ -1274,20 +1173,6 @@ export default {
 
 #townsquare:not(.spectator) .fabled ul li:hover .token:before {
   opacity: 1;
-}
-
-#version {
-    position: fixed;
-    bottom: 0;
-    right: 0;
-    background-color: transparent;
-    color: white;
-    padding: 0px;
-}
-
-#version a {
-    color: white;
-    text-decoration: none;
 }
 
 #copyright {
