@@ -338,6 +338,10 @@
             <li @click="toggleModal('version')">
               更新日志
             </li>
+            <li @click="showBuild = !showBuild" :title="'最后更新时间 ' + buildTimeText">
+              build {{ buildVersion }}
+              <em v-if="showBuild" class="build-time">{{ buildTimeText }}</em>
+            </li>
             <li @click="toggleModal('gameState')">
               游戏状态JSON
               <em><font-awesome-icon icon="file-code"/></em>
@@ -504,7 +508,7 @@ import { nextTick } from 'vue';
 
 export default {
   computed: {
-    ...mapState(["grimoire", "session", "lobby", "edition", "channels", "selectedEditions"]),
+    ...mapState(["grimoire", "session", "lobby", "edition", "channels", "selectedEditions", "buildVersion"]),
     ...mapState("players", ["players"]),
     formattedTime() {
       const minutes = Math.floor(this.session.timer / 60);
@@ -526,11 +530,22 @@ export default {
       console.log(deviceType);
       if (/mobile|android|touch|webos|iphone|ipod/i.test(deviceType)) return true;
       return false;
+    },
+    // 构建时注入的最后更新时间（见 vue.config.js 的 __BUILD_TIME__），格式化成本地可读时间
+    buildTimeText() {
+      const raw = typeof __BUILD_TIME__ !== "undefined" ? __BUILD_TIME__ : "";
+      if (!raw) return "未知";
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return raw;
+      const pad = n => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+        `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
   },
   data() {
     return {
       tab: "grimoire",
+      showBuild: false,
       timing: false,
       distributing: false,
       distributingBluffs: false,
@@ -1594,6 +1609,12 @@ export default {
       &:hover {
         color: inherit;
       }
+    }
+
+    .build-time {
+      font-size: 80%;
+      opacity: 0.7;
+      padding-left: 6px;
     }
   }
 }

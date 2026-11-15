@@ -336,11 +336,19 @@ app.use(cors());
 app.use(express.json({ limit: "6mb" })); // 头像 base64 可能较大
 
 // 动态配置
+// 版本号统一读 package.json，避免前后端版本号不一致导致「并非最新版本」误报。
+let APP_VERSION = "0.0.0";
+try {
+  APP_VERSION = require(path.join(__dirname, "..", "package.json")).version || APP_VERSION;
+} catch (e) {
+  APP_VERSION = process.env.APP_VERSION || "0.0.0";
+}
+
 app.get("/dynamic/init", (req, res) => {
   res.json({
     status: "success",
     payload: {
-      version: "3.3.1",
+      version: APP_VERSION,
       floatingNotice: process.env.FLOATING_NOTICE || "",
     },
   });
@@ -350,7 +358,7 @@ app.get("/dynamic/init", (req, res) => {
 app.get("/api/init", (req, res) => {
   res.json({
     status: "success",
-    payload: { version: "3.3.1", floatingNotice: process.env.FLOATING_NOTICE || "" },
+    payload: { version: APP_VERSION, floatingNotice: process.env.FLOATING_NOTICE || "" },
   });
 });
 

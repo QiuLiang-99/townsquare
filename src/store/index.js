@@ -111,7 +111,8 @@ export default new Vuex.Store({
     quickWake
   },
   state: {
-    version: "3.3.1",
+    version: "3.4.0",
+    buildVersion: "",
     latestVersion: "",
     lastVersion: "",
     floatingNotice: "",
@@ -220,6 +221,9 @@ export default new Vuex.Store({
     },
     setLastVersion(state, val) {
       state.lastVersion = val;
+    },
+    setBuildVersion(state, val) {
+      state.buildVersion = val;
     },
     setFloatingNotice(state, val) {
       state.floatingNotice = val;
