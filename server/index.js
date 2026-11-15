@@ -109,14 +109,21 @@ function dissolveRoom(channel) {
   const room = rooms.get(channel);
   if (!room) return;
   cancelRoomCleanup(channel);
-  const data = frame("alertPopup", "房间已被说书人解散。");
-  if (room.host) trySafeSend(room.host.ws, data);
+  // 通知所有玩家：用 1000(正常关闭) + reason 关闭。
+  // 客户端 onclose 里 code!==1000 会被当作“网络中断”并在 3 秒后自动重连，
+  // 若用 4005 之类非 1000 的码，玩家会重连进一个已不存在的幽灵房间、且看不到提示。
+  // code=1000 才会走客户端的“正常离开”分支：清理状态、回到首页，并弹出 err.reason。
   room.players.forEach((p) => {
-    trySafeSend(p.ws, data);
     try {
-      p.ws.close(4005, "room dissolved");
+      p.ws.close(1000, "房间已被说书人解散。");
     } catch {}
   });
+  // 说书人自己：同样用 1000 关闭（reason 留空，避免重现“房间已被解散”的弹窗给自己）。
+  if (room.host) {
+    try {
+      room.host.ws.close(1000);
+    } catch {}
+  }
   rooms.delete(channel);
   roomCleanupTimers.delete(channel);
   notifyLobbyRemove(channel);
