@@ -69,14 +69,11 @@
           <font-awesome-icon icon="question" @click="tab = 'help'" />
         </li>
 
-        <li v-if="session.isSpectator && session.sessionId" @click="toggleModal('playerWake')">
-          <font-awesome-icon icon="bell" /> 快捷唤醒记录
-        </li>
-
         <template v-if="tab === 'grimoire'">
           <!-- Grimoire -->
           <li class="headline">魔典</li>
           <div class="options">
+            <li class="subhead">游戏操作</li>
             <li @click="toggleGrimoire" v-if="players.length">
               <template v-if="!grimoire.isPublic">隐藏</template>
               <template v-if="grimoire.isPublic">显示</template>
@@ -86,10 +83,6 @@
               <template v-if="!grimoire.isNight">切换至夜晚</template>
               <template v-if="grimoire.isNight">切换至白天</template>
               <em>[S]</em>
-            </li>
-            <li @click="toggleModal('groupChat')" v-if="!session.isSpectator">
-              创建群聊（beta）
-              <em>[D]</em>
             </li>
             <li @click="toggleIsReview" v-if="!session.isSpectator">
               复盘视角
@@ -102,6 +95,7 @@
                 />
               </em>
             </li>
+            <li class="subhead">夜间工具</li>
             <li @click="toggleNightOrder" v-if="players.length">
               夜间顺序
               <em>
@@ -113,103 +107,17 @@
                 />
               </em>
             </li>
-            <li @click="toggleModal('nightWake')" v-if="players.length">
+            <li v-if="session.isSpectator && session.sessionId" @click="toggleModal('playerWake')">
+              快捷唤醒记录
+              <em><font-awesome-icon icon="bell" /></em>
+            </li>
+            <li @click="toggleModal('nightWake')" v-if="players.length && !session.isSpectator">
               夜间唤醒助手
               <em><font-awesome-icon icon="cloud-moon" /></em>
             </li>
-            <li v-if="players.length">
-              缩放
-              <em>
-                <font-awesome-icon
-                  @click="setZoom(grimoire.zoom - 1)"
-                  icon="search-minus"
-                />
-                {{ Math.round(100 + grimoire.zoom * 10) }}%
-                <font-awesome-icon
-                  @click="setZoom(grimoire.zoom + 1)"
-                  icon="search-plus"
-                />
-              </em>
-            </li>
-            <li @click="setBackground">
-              背景图
-              <em><font-awesome-icon icon="image"/></em>
-            </li>
-            <li @click="$emit('trigger', ['uploadAvatar'])">
-              上传头像
-              <em><font-awesome-icon icon="user"/></em>
-            </li>
-            <li @click="changeName">
-              设置昵称
-              <em><font-awesome-icon icon="user-edit"/></em>
-            </li>
-            <li v-if="!edition.isOfficial" @click="imageOptIn">
-              <small>允许自定义图标</small>
-              <em
-                ><font-awesome-icon
-                  :icon="[
-                    'fas',
-                    grimoire.isImageOptIn ? 'check-square' : 'square'
-                  ]"
-              /></em>
-            </li>
-            <!-- <li v-if="!edition.isOfficial" @click="toggleForwardEvilInfo">
-              <small>提前邪恶互认和信息</small>
-              <em
-                ><font-awesome-icon
-                  :icon="[
-                    'fas',
-                    grimoire.isForwardEvilInfo ? 'check-square' : 'square'
-                  ]"
-              /></em>
-            </li> -->
-            <li @click="toggleStatic">
-              关闭动画
-              <em
-                ><font-awesome-icon
-                  :icon="['fas', grimoire.isStatic ? 'check-square' : 'square']"
-              /></em>
-            </li>
-            <li v-if="!session.isSpectator" @click="useOldOrderAsk">
-              使用原夜间顺序
-            </li>
-            <li v-if="!session.isSpectator" @click="useOldRoleAsk">
-              使用原角色能力
-            </li>
-            <li v-if="!!session.sessionId & session.isSpectator">
-              <div class="wrap">
-                <div @click="startEditingThreshold">
-                  <span>麦克风阈值</span>
-                  <span v-if="!isEditingThreshold">（{{ audioThresholdNumber }}）</span>
-                  <input v-else ref="audioInputNumber" type="number" v-model.number="audioThresholdNumber"
-                  class="input"
-                  @blur="stopEditingThreshold(false)"
-                  @keyup.esc="stopEditingThreshold(false)"
-                  @keyup.enter="stopEditingThreshold(true)"
-                  />
-                </div>
-                <input
-                  type="range"
-                  v-model.number="audioThresholdSlider"
-                  min="0"
-                  max="400"
-                  step="1"
-                  @input="syncAudioThresholdNumber(false)"
-                  @mouseup="syncAudioThresholdNumber(true)"
-                />
-              </div>
-            </li>
-            <li @click="toggleMuted">
-              静音
-              <em
-                ><font-awesome-icon
-                  :icon="['fas', grimoire.isMuted ? 'volume-mute' : 'volume-up']"
-              /></em>
-            </li>
-            <li @click="clearLocalStorage">
-              清空储存
-              <em
-                ><font-awesome-icon icon="trash-alt"/></em>
+            <li @click="toggleModal('quick')" v-if="!session.isSpectator">
+              快捷唤醒短语
+              <em><font-awesome-icon icon="comment-dots" /></em>
             </li>
           </div>
         </template>
@@ -236,21 +144,6 @@
                 复制链接
                 <em><font-awesome-icon icon="copy"/></em>
               </li>
-              <li v-if="!session.isSpectator" @click="distributeAsk">
-                发送角色
-                <em><font-awesome-icon icon="theater-masks"/></em>
-              </li>
-              <li v-if="!session.isSpectator" @click="distributeTypeAsk">
-                发送角色类型
-              </li>
-              <li v-if="!session.isSpectator" @click="distributeBluffsAsk">
-                发送伪装身份
-                <em><font-awesome-icon icon="hat-wizard"/></em>
-              </li>
-              <li v-if="!session.isSpectator" @click="distributeGrimoireAsk">
-                发送魔典
-                <em><font-awesome-icon icon="book"/></em>
-              </li>
               <li
                 v-if="session.voteHistory.length || !session.isSpectator"
                 @click="toggleModal('voteHistory')"
@@ -261,6 +154,41 @@
                 <span v-if="session.isSpectator">退出房间</span>
                 <span v-if="!session.isSpectator">解散房间</span>
                 <em>{{ session.sessionId }}</em>
+              </li>
+              <li class="subhead">通讯</li>
+              <li @click="toggleModal('groupChat')" v-if="!session.isSpectator">
+                创建群聊（beta）
+                <em>[D]</em>
+              </li>
+              <li v-if="!!session.sessionId && session.isSpectator">
+                <div class="wrap">
+                  <div @click="startEditingThreshold">
+                    <span>麦克风阈值</span>
+                    <span v-if="!isEditingThreshold">（{{ audioThresholdNumber }}）</span>
+                    <input v-else ref="audioInputNumber" type="number" v-model.number="audioThresholdNumber"
+                    class="input"
+                    @blur="stopEditingThreshold(false)"
+                    @keyup.esc="stopEditingThreshold(false)"
+                    @keyup.enter="stopEditingThreshold(true)"
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    v-model.number="audioThresholdSlider"
+                    min="0"
+                    max="400"
+                    step="1"
+                    @input="syncAudioThresholdNumber(false)"
+                    @mouseup="syncAudioThresholdNumber(true)"
+                  />
+                </div>
+              </li>
+              <li @click="toggleMuted">
+                静音
+                <em
+                  ><font-awesome-icon
+                    :icon="['fas', grimoire.isMuted ? 'volume-mute' : 'volume-up']"
+                /></em>
               </li>
             </template>
           </div>
@@ -276,7 +204,7 @@
               <em><font-awesome-icon icon="dice"/></em>
             </li>
             <li @click="clearPlayers" v-if="players.length">
-              移除全部
+              移除全部座位
               <em><font-awesome-icon icon="trash-alt"/></em>
             </li> 
           </div>
@@ -286,6 +214,7 @@
           <!-- Characters -->
           <li class="headline">角色</li>
           <div class="options">
+            <li class="subhead">配置</li>
             <li v-if="!session.isSpectator" @click="toggleModal('edition')">
               选择剧本
               <em>[E]</em>
@@ -311,17 +240,35 @@
                 自定义私货商人
               </small>
             </li>
+            <li v-if="!session.isSpectator" @click="useOldOrderAsk">
+              使用原夜间顺序
+            </li>
+            <li v-if="!session.isSpectator" @click="useOldRoleAsk">
+              使用原角色能力
+            </li>
             <li @click="clearRoles" v-if="players.length">
-              移除全部
+              移除全部角色
               <em><font-awesome-icon icon="trash-alt"/></em>
             </li>
-          </div>
-        </template>
-
-        <template v-if="tab === 'help'">
-          <!-- Help -->
-          <li class="headline">帮助</li>
-          <div>
+            <template v-if="!session.isSpectator">
+              <li class="subhead">发送给玩家</li>
+              <li @click="distributeAsk">
+                发送角色
+                <em><font-awesome-icon icon="theater-masks"/></em>
+              </li>
+              <li @click="distributeTypeAsk">
+                发送角色类型
+              </li>
+              <li @click="distributeBluffsAsk">
+                发送伪装身份
+                <em><font-awesome-icon icon="hat-wizard"/></em>
+              </li>
+              <li @click="distributeGrimoireAsk">
+                发送魔典
+                <em><font-awesome-icon icon="book"/></em>
+              </li>
+            </template>
+            <li class="subhead">参考资料</li>
             <li @click="toggleModal('reference')">
               角色技能表
               <em>[R]</em>
@@ -330,10 +277,63 @@
               夜间顺序表
               <em>[N]</em>
             </li>
-            <li @click="toggleModal('quick')">
-              快捷唤醒短语
-              <em><font-awesome-icon icon="comment-dots" /></em>
+          </div>
+        </template>
+
+        <template v-if="tab === 'help'">
+          <!-- Help -->
+          <li class="headline">帮助</li>
+          <div>
+            <li class="subhead">显示与个性化</li>
+            <li v-if="players.length">
+              缩放
+              <em>
+                <font-awesome-icon
+                  @click="setZoom(grimoire.zoom - 1)"
+                  icon="search-minus"
+                />
+                {{ Math.round(100 + grimoire.zoom * 10) }}%
+                <font-awesome-icon
+                  @click="setZoom(grimoire.zoom + 1)"
+                  icon="search-plus"
+                />
+              </em>
             </li>
+            <li @click="setBackground">
+              背景图
+              <em><font-awesome-icon icon="image"/></em>
+            </li>
+            <li @click="$emit('trigger', ['uploadAvatar'])">
+              上传头像
+              <em><font-awesome-icon icon="user"/></em>
+            </li>
+            <li @click="changeName">
+              设置昵称
+              <em><font-awesome-icon icon="user-edit"/></em>
+            </li>
+            <li @click="toggleStatic">
+              关闭动画
+              <em
+                ><font-awesome-icon
+                  :icon="['fas', grimoire.isStatic ? 'check-square' : 'square']"
+              /></em>
+            </li>
+            <li v-if="!edition.isOfficial" @click="imageOptIn">
+              <small>允许自定义图标</small>
+              <em
+                ><font-awesome-icon
+                  :icon="[
+                    'fas',
+                    grimoire.isImageOptIn ? 'check-square' : 'square'
+                  ]"
+              /></em>
+            </li>
+            <li @click="clearLocalStorage">
+              清空储存
+              <em
+                ><font-awesome-icon icon="trash-alt"/></em>
+            </li>
+            <li class="subhead">关于</li>
             <li>
               <a href="https://botcgrimoire.top/manual" target="_blank">使用说明参考</a>
             </li>
@@ -1580,6 +1580,20 @@ export default {
         rgba(0, 0, 0, 0.5) 80%,
         $demon 100%
       );
+    }
+
+    .subhead {
+      cursor: default;
+      font-size: 75%;
+      letter-spacing: 1px;
+      opacity: 0.6;
+      padding: 6px 10px 2px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+      pointer-events: none;
+
+      &:hover {
+        color: inherit;
+      }
     }
   }
 }
