@@ -291,6 +291,7 @@ function roomLobbyItem(channel, room) {
     name: m.name || "",
     stName: m.stName || "",
     edition: m.edition || "tb",
+    editionName: m.editionName || "",
     maxPlayers: m.maxPlayers || room.playerCount || 0,
   };
 }
@@ -773,6 +774,7 @@ function routeRoomMessage(ws, command, params, feedback) {
       if (typeof params.name === "string") clean.name = params.name.slice(0, 60);
       if (typeof params.stName === "string") clean.stName = params.stName.slice(0, 40);
       if (typeof params.edition === "string") clean.edition = params.edition.slice(0, 32);
+      if (typeof params.editionName === "string") clean.editionName = params.editionName.slice(0, 60);
       if (Number.isFinite(params.maxPlayers)) clean.maxPlayers = Math.max(0, Math.min(20, Math.floor(params.maxPlayers)));
       room.meta = Object.assign({}, room.meta, clean);
       // 房间若已在大厅可见，广播更新；否则（首次）按新增处理

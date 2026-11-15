@@ -23,7 +23,7 @@
           </div>
           <div class="wl-info">
             <div class="wl-name">{{ room.name || room.channel }}</div>
-            <div class="wl-edition">{{ editionName(room.edition) }}</div>
+            <div class="wl-edition">{{ editionName(room.edition, room.editionName) }}</div>
             <div class="wl-meta">
               <span class="wl-cell"><font-awesome-icon icon="users" /> {{ room.players }}/{{ room.maxPlayers || room.players }}</span>
               <span class="wl-cell"><font-awesome-icon icon="hashtag" /> {{ room.channel }}</span>
@@ -53,9 +53,13 @@ export default {
     },
   },
   methods: {
-    editionName(id) {
+    editionName(id, customName) {
+      // 官方剧本：按 id 取内置名称；自定义剧本：走说书人上报的真实剧本名，
+      // 避免所有自定义剧本都显示成 "custom"。
       const e = EDITIONS.get(id);
-      return e ? e.name : id || "未选择剧本";
+      if (e) return e.name;
+      if (customName) return customName;
+      return id || "未选择剧本";
     },
     editionImage(id) {
       try {

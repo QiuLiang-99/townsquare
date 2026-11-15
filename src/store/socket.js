@@ -849,6 +849,7 @@ class LiveSession {
       name: session.sessionName || "",
       stName: session.playerName || "",
       edition: edition.id || "tb",
+      editionName: edition.name || "",
       maxPlayers: players.length
     });
   }
