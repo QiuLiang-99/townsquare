@@ -567,6 +567,9 @@ class LiveSession {
       case "isReview":
         this._handleSetIsReview(params);
         break;
+      case "reviewRevealed":
+        this._handleSetReviewRevealed(params);
+        break;
       case "setTalking":
         this._handleSetTalking(params);
         break;
@@ -862,7 +865,12 @@ class LiveSession {
       name: player.name,
       id: player.id,
       image: player.image,
-      stReminders: this._store.state.session.isReview ? player.stReminders : [],
+      // 复盘视角下把说书人的提醒标记下发给玩家观看。这里直接从当前 reminders 实时派生
+      // （去掉自定义提醒），不再读 player.stReminders —— 后者是只在添加/删除时更新的影子副本，
+      // 换角色/新开一局等路径不会同步，会让玩家看到过时（已移除/已换角色）的残留 token。
+      stReminders: this._store.state.session.isReview
+        ? player.reminders.filter(reminder => reminder.role !== "custom")
+        : [],
       isDead: player.isDead,
       isVoteless: player.isVoteless,
       votes: player.votes,
@@ -897,6 +905,7 @@ class LiveSession {
         isUseOldOrder: session.isUseOldOrder,
         isUseOldRole: session.isUseOldRole,
         isReview: session.isReview,
+        reviewRevealed: session.isReview ? session.reviewRevealed : [],
         nomination: session.nomination,
         votingSpeed: session.votingSpeed,
         lockedVote: session.lockedVote,
@@ -956,6 +965,7 @@ class LiveSession {
       isUseOldOrder,
       isUseOldRole,
       isReview,
+      reviewRevealed,
       nomination,
       votingSpeed,
       votes,
@@ -1021,6 +1031,7 @@ class LiveSession {
       this._store.commit("session/setUseOldOrder", isUseOldOrder);
       this._store.commit("session/setUseOldRole", isUseOldRole);
       this._store.commit("session/setIsReview", isReview);
+      this._store.commit("session/setReviewRevealed", isReview ? reviewRevealed : []);
       const nominatedPlayer = nomination.length ? players[nomination[1]] : null;
       this._store.commit("session/nomination", {
         nomination,
@@ -1735,8 +1746,10 @@ class LiveSession {
           ]);
         }
         if (all) {
+          // 从当前 reminders 实时派生（去掉自定义提醒），保证下发内容与说书人当前标记一致，
+          // 不读会残留过时数据的 player.stReminders 影子副本。
           message.stReminders.push([
-            { index, property: "stReminder", value: player.stReminders }
+            { index, property: "stReminder", value: player.reminders.filter(reminder => reminder.role !== "custom") }
           ]);
         }
       });
@@ -1812,15 +1825,15 @@ class LiveSession {
         });
       })
     }
-    // set stReminders
+    // set stReminders（全量同步：说书人处为空也必须下发覆盖，否则玩家端会残留上一次复盘的旧标记）
     if (payload.stReminders) {
       payload.stReminders.forEach(grimReminder => {
-        if (!grimReminder[0].value.length) return
         const player = this._store.state.players.players[grimReminder[0].index];
+        const value = Array.isArray(grimReminder[0].value) ? grimReminder[0].value : [];
         this._store.commit("players/update", {
           player,
           property: "stReminders",
-          value: grimReminder[0].value
+          value
         });
       })
     }
@@ -1985,6 +1998,10 @@ class LiveSession {
 
   setIsReview(isReview){
     if (this._isSpectator) return;
+    // 说书人本地也要清空揭示状态（服务端只在玩家端回放清空）
+    if (!isReview) {
+      this._store.state.session.reviewRevealed = [];
+    }
     this._send("isReview", isReview);
   }
 
@@ -1992,6 +2009,7 @@ class LiveSession {
     if (!this._isSpectator) return;
     this._store.state.session.isReview = isReview;
     if (!isReview) {
+      this._store.state.session.reviewRevealed = [];
       this._store.state.players.players.forEach(player => {
         this._store.commit("players/update", {
           player,
@@ -2000,6 +2018,20 @@ class LiveSession {
         });
       });
     }
+  }
+
+  /**
+   * 复盘视角：说书人点开/收起某个座位，广播给全房间
+   * @param revealedIndexes 当前被揭示的座位下标数组
+   */
+  sendReviewRevealed(revealedIndexes){
+    if (this._isSpectator) return;
+    this._send("reviewRevealed", revealedIndexes);
+  }
+
+  _handleSetReviewRevealed(revealedIndexes){
+    if (!this._isSpectator) return;
+    this._store.state.session.reviewRevealed = Array.isArray(revealedIndexes) ? [...revealedIndexes] : [];
   }
 
   /**
@@ -2832,6 +2864,10 @@ export default store => {
       case "session/setIsReview":
         session.setIsReview(payload);
         if (payload) session.distributeGrimoire({all: true});
+        break;
+      case "session/setReviewRevealed":
+        // 说书人点开/收起某个座位 → 广播给全房间（仅说书人触发；玩家端仅接收）
+        session.sendReviewRevealed(payload);
         break;
       // case "session/setBootlegger":
       //   session.setBootlegger(payload);

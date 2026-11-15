@@ -9,9 +9,9 @@ import { wraith } from './assets/svg/wraith';
 
 const faIcons = [
   "AddressCard",
-  "ArrowCircleUp",
-  "ArrowCircleDown",
+  "ArrowCircleUp",  "ArrowCircleDown",
   "ArrowLeft",
+  "Ban",
   "Bell",
   "PaperPlane",
   "Book",

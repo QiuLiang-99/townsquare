@@ -85,13 +85,11 @@
               <em>[S]</em>
             </li>
             <li @click="toggleIsReview" v-if="!session.isSpectator">
-              复盘视角
+              <template v-if="session.isReview">结束复盘</template>
+              <template v-else>复盘视角</template>
               <em>
                 <font-awesome-icon
-                  :icon="[
-                    'fas',
-                    session.isReview ? 'check-square' : 'square'
-                  ]"
+                  :icon="['fas', session.isReview ? 'ban' : 'eye']"
                 />
               </em>
             </li>
@@ -1139,24 +1137,26 @@ export default {
       }
     },
     async toggleIsReview() {
-      if (this.isSpectator) return;
+      if (this.session.isSpectator) return;
 
-      const confirm = this.session.isReview ? false : await this.showInputModal({
+      if (this.session.isReview) {
+        // 结束复盘：恢复正常视角
+        this.$store.commit("session/setIsReview", false);
+        return;
+      }
+
+      const confirm = await this.showInputModal({
         inputType: "confirm",
         inputModal: "confirm",
         inputData: {
-          name: ["是否开启复盘视角？（所有玩家将看到角色）"]
+          name: ["是否开启复盘视角？（所有玩家将看到牌背，你点开某个座位后所有人可见其身份）"]
         }
       }).catch(() => {
         return null;
       });
-      if (confirm === null) return;
-
-      if (!this.session.isReview && confirm === true) {
-        this.$store.commit("session/setIsReview", !this.session.isReview);
+      if (confirm === true) {
+        this.$store.commit("session/setIsReview", true);
         this.$store.dispatch("players/realivePlayers");
-      } else if (this.session.isReview) {
-        this.$store.commit("session/setIsReview", false);
       }
     },
     useOldOrderAsk() {

@@ -840,6 +840,14 @@ function routeRoomMessage(ws, command, params, feedback) {
       return;
     }
 
+    case "reviewRevealed": {
+      // 复盘视角：仅说书人可广播「谁被点开揭示」，转发全房间并缓存供重连补发
+      if (!meta.isHost) return;
+      room.reviewRevealed = Array.isArray(params) ? params.slice(0, 20) : [];
+      broadcastRoom(room, "reviewRevealed", room.reviewRevealed, ws);
+      return;
+    }
+
     default: {
       if (isQuickWakeCommand(command)) {
         sendQuickWakeError(ws, params && (params.id || params.wakeId), "forbidden", "快捷唤醒消息不可广播。");

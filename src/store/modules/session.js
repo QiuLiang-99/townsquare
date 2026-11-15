@@ -68,6 +68,8 @@ const state = () => ({
     lycanthrope: false
   },
   isReview: false,
+  // 复盘视角：被说书人点开揭示的座位下标数组；-1 表示无。所有端同步。
+  reviewRevealed: [],
   isChatOpen: false,
   isTyping: false,
   messageQueue: [],
@@ -129,6 +131,9 @@ const mutations = {
   setUseOldOrder: set("isUseOldOrder"),
   setUseOldRole: set("isUseOldRole"),
   setIsReview: set("isReview"),
+  setReviewRevealed(state, val) {
+    state.reviewRevealed = Array.isArray(val) ? [...val] : [];
+  },
   setInputResolver(state, resolver) {
     state.inputResolver = resolver;
   },

@@ -1,5 +1,5 @@
 <template>
-  <li :style="zoom" :class="{ revealed: revealed }">
+  <li :style="zoom" :class="{ revealed: isUnveiled }">
     <div
       ref="player"
       class="player"
@@ -11,7 +11,7 @@
           'vote-yes': session.votes[index],
           'vote-lock': voteLocked,
           talking: player.isTalking && player.id,
-          revealed: revealed
+          revealed: isUnveiled
         },
         player.role.team
       ]"
@@ -19,8 +19,8 @@
       <div class="seatNum">{{ players.indexOf(player) + 1 }}</div>
       <div class="newMessage" v-show="player.newMessages > 0">{{ player.newMessages }}</div>
 
-      <!-- 隐藏模式下的整座点击层：确保点座位任意位置都立即翻牌/盖上 -->
-      <div v-if="grimoire.isPublic" class="public-click-catcher" @click.stop="toggleStatus()"></div>
+      <!-- 隐藏模式 / 复盘视角下的整座点击层：确保点座位任意位置都立即响应 -->
+      <div v-if="grimoire.isPublic || session.isReview" class="public-click-catcher" @click.stop="toggleStatus()"></div>
 
       <div class="shroud" @click="toggleStatus()"></div>
       <div class="life" @click="toggleStatus()"></div>
@@ -330,6 +330,16 @@ export default {
     index: function() {
       return this.players.indexOf(this.player);
     },
+    // 复盘视角下，本座位是否已被说书人点开揭示（所有端共享，来自 session.reviewRevealed）
+    reviewRevealed: function() {
+      return this.session.isReview &&
+        Array.isArray(this.session.reviewRevealed) &&
+        this.session.reviewRevealed.includes(this.index);
+    },
+    // 座位是否处于“翻开揭示”状态：隐藏模式用本地 revealed，复盘视角用共享 reviewRevealed
+    isUnveiled: function() {
+      return this.grimoire.isPublic ? this.revealed : this.reviewRevealed;
+    },
     voteLocked: function() {
       const session = this.session;
       const players = this.players.length;
@@ -486,6 +496,10 @@ export default {
       if (this.grimoire.isPublic) {
         // 隐藏模式：点击玩家 = 翻转揭示/盖上该玩家角色（不再切换生死/遗言票）
         this.revealed = !this.revealed;
+      } else if (this.session.isReview) {
+        // 复盘视角：只有说书人能点开/收起；玩家端点击无效（只读）
+        if (this.session.isSpectator) return;
+        this.toggleReviewReveal();
       } else {
         this.updatePlayer("isDead", !this.player.isDead);
         if (this.player.isMarked) {
@@ -499,6 +513,18 @@ export default {
           this.updatePlayer("isVoteless", false);
         }
       }
+    },
+    // 说书人切换到该座位是否被揭示（写共享状态，socket 插件会广播给全房间）
+    toggleReviewReveal() {
+      const idx = this.index;
+      const cur = Array.isArray(this.session.reviewRevealed) ? [...this.session.reviewRevealed] : [];
+      const pos = cur.indexOf(idx);
+      if (pos >= 0) {
+        cur.splice(pos, 1);
+      } else {
+        cur.push(idx);
+      }
+      this.$store.commit("session/setReviewRevealed", cur);
     },
     toggleVote() {
       if (!this.player.isDead) return;
@@ -914,6 +940,71 @@ export default {
    注意：reminder 是 <li> 的直接子元素（不在 .player 内），所以选择器用 li.revealed */
 #townsquare.public li.revealed .reminder:not(.add) {
   opacity: 1;
+  pointer-events: none;
+}
+
+/* ===== 复盘视角 (review) =====
+   与“隐藏”按钮同样把全场牌盖住；但“翻开”不是各端本地操作，而是由说书人点开某个座位后
+   通过 session.reviewRevealed 同步给全房间，所有人一起看到该座位被翻开、身份被看清。
+   玩家端点击无效（见 Player.vue toggleStatus 的 isReview 分支）。
+   注意：牌背(life.png) 是 .life 元素，盖住时要把 .life 转到正面(0deg)、.token 转背面(-180deg)
+   与“隐藏”按钮完全一致；只翻 .token 会出现空图标。 */
+#townsquare.review .player .shroud {
+  transform: perspective(400px) rotateX(90deg);
+  pointer-events: none;
+}
+#townsquare.review .circle .token {
+  transform: perspective(400px) rotateY(-180deg);
+}
+#townsquare.review .player .life {
+  transform: perspective(400px) rotateY(0deg);
+}
+/* 旅行者处理与“隐藏”相同 */
+#townsquare.review .player.traveler:not(.dead) .token {
+  transform: perspective(400px) scale(0.8);
+  pointer-events: none;
+  transition-delay: 0s;
+}
+#townsquare.review .player.traveler.dead .token {
+  transition-delay: 0s;
+}
+/* 夜序提示标记：与“隐藏”按钮一致，复盘期间一律不显示（由 TownSquare.vue 隐藏），
+   即使座位被揭示也不显示夜序标记。 */
+#townsquare.review .player .public-click-catcher {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 20;
+  cursor: pointer;
+}
+/* 玩家端牌背不可点 */
+#townsquare.review.spectator .player .public-click-catcher {
+  cursor: default;
+}
+/* 被说书人点开(revealed)的座位：翻牌显示角色 */
+#townsquare.review .player.revealed .token {
+  transform: perspective(400px) rotateY(0deg);
+  transition-delay: 0s !important;
+}
+#townsquare.review .player.revealed .life {
+  transform: perspective(400px) rotateY(180deg);
+  transition-delay: 0s !important;
+}
+#townsquare.review .player.revealed .shroud {
+  transform: perspective(400px) rotateX(0deg);
+  transition-delay: 0s !important;
+  pointer-events: none;
+}
+/* 被揭示座位恢复显示夜序标记（盖住时由 TownSquare.vue 隐藏） */
+#townsquare.review li.revealed .reminder:not(.add) {
+  opacity: 1;
+  pointer-events: none;
+}
+/* reminder 在复盘模式未揭示时隐藏（仅显示已揭示的） */
+#townsquare.review .reminder {
+  opacity: 0;
   pointer-events: none;
 }
 

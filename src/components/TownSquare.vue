@@ -4,6 +4,7 @@
     class="square"
     :class="{
       public: grimoire.isPublic,
+      review: session.isReview,
       spectator: session.isSpectator,
       vote: session.nomination
     }"
@@ -887,6 +888,11 @@ export default {
   }
 
   #townsquare.public & {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  #townsquare.review & {
     opacity: 0;
     pointer-events: none;
   }
