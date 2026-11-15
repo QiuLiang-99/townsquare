@@ -577,6 +577,7 @@ function handleRoomConnection(ws, pathname, req) {
         everHadHost: false,
         meta: {},
         quickWake: { records: new Map(), order: [] },
+        lastGs: null, // 缓存说书人最近一次广播的 gs（含座位表），供新加入者补发
       };
       rooms.set(channel, room);
     }
@@ -661,8 +662,12 @@ function handleRoomConnection(ws, pathname, req) {
     log("player connect channel", channel, "playerId", playerId, "players:", room.players.size);
     // 客户端会 _request checkAllowJoin；此处按房间是否存在(曾有过host)回答
     send(ws, "allowJoin", true);
-    sendPendingQuickWakes(ws, room, playerId);
-    notifyQuickWakePresence(room);
+    // 关键修复：若说书人此前已广播过 gs（含座位表），立即补发给刚加入的玩家，
+    // 避免依赖"客户端主动向 host 请求 getGamestate 且 host 恰好在线并回应"这一时序，
+    // 否则新加入者可能看不到任何座位。缓存的 gs 是普通负荷（非 lightweight），座位信息完整。
+    if (room.lastGs) {
+      send(ws, "gs", room.lastGs);
+    }
     notifyLobbyUpdate(channel);
   }
 }
@@ -836,6 +841,10 @@ function routeRoomMessage(ws, command, params, feedback) {
       // 其余所有游戏广播命令（gs/player/nomination/vote/lock/swap/move/remove/
       // chat/addGroupChat/fabled/isNight/votingSpeed/... ）一律原样转发给房间内
       // 除发送者外的所有连接（host 发出的给所有玩家，玩家发出的给 host 及其他玩家）。
+      // 若说书人广播的是完整 gs（含座位表），缓存一份，供后续新加入者补发（见 handleRoomConnection）。
+      if (command === "gs" && meta.isHost && params && Array.isArray(params.gamestate) && !params.isLightweight) {
+        room.lastGs = params;
+      }
       broadcastRoom(room, command, params, ws);
       return;
     }
