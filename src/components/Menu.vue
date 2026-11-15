@@ -69,6 +69,10 @@
           <font-awesome-icon icon="question" @click="tab = 'help'" />
         </li>
 
+        <li v-if="session.isSpectator && session.sessionId" @click="toggleModal('playerWake')">
+          <font-awesome-icon icon="bell" /> 快捷唤醒记录
+        </li>
+
         <template v-if="tab === 'grimoire'">
           <!-- Grimoire -->
           <li class="headline">魔典</li>

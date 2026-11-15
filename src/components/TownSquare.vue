@@ -489,6 +489,17 @@ export default {
         this.scrollToBottom();
       });
     },
+    openDirectedWake(playerIndex) {
+      if (this.session.isSpectator) return;
+      const player = this.players[playerIndex];
+      if (!player || !player.id || player.id === "host" || player.id === this.session.playerId) return;
+      this.$store.commit("quickWake/openTarget", {
+        playerId: player.id,
+        name: player.name,
+        seat: playerIndex + 1
+      });
+      this.$store.commit("toggleModal", "directedWake");
+    },
     toggleChat(){
       if(this.isChatMin){
         this.maximiseChat();

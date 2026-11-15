@@ -1,10 +1,12 @@
 import Vue from "vue";
 import Vuex from "vuex";
 import persistence from "./persistence";
+import quickWakePersistence from "./quickWakePersistence";
 import socket from "./socket";
 import players from "./modules/players";
 import session from "./modules/session";
 import lobby from "./modules/lobby";
+import quickWake from "./modules/quickWake";
 import editionJSON from "../editions.json";
 import rolesJSON from "../roles.json";
 import fabledJSON from "../fabled.json";
@@ -105,7 +107,8 @@ export default new Vuex.Store({
   modules: {
     players,
     session,
-    lobby
+    lobby,
+    quickWake
   },
   state: {
     version: "3.3.1",
@@ -142,7 +145,9 @@ export default new Vuex.Store({
       voteHistory: false,
       input: false,
       groupChat: false,
-      quick: false
+      quick: false,
+      directedWake: false,
+      playerWake: false
     },
     edition: editionJSONbyId.get("tb"),
     selectedEditions: {
@@ -238,6 +243,11 @@ export default new Vuex.Store({
     toggleImageOptIn: toggle("isImageOptIn"),
     toggleForwardEvilInfo:toggle("isForwardEvilInfo"),
     toggleModal({ modals }, name) {
+      if (this.getters["quickWake/pendingCount"] > 0) {
+        // Only allow opening the required dialog; never allow toggling it off
+        // or replacing it via the global close/shortcut paths.
+        if (name !== "playerWake" || modals.playerWake) return;
+      }
       if (modals.input) this.state.session.isTyping = false;
       if (name) {
         modals[name] = !modals[name];
@@ -457,5 +467,5 @@ export default new Vuex.Store({
       }
     }
   },
-  plugins: [persistence, socket]
+  plugins: [persistence, quickWakePersistence, socket]
 });

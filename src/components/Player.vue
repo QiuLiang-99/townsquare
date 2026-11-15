@@ -246,6 +246,13 @@
                 <font-awesome-icon icon="comment" prefix="fa"/>
               私聊
             </li>
+            <li
+              @click="openDirectedWake(player)"
+              :class="{ disabled: !player.id || player.id === 'host' || player.id === session.playerId }"
+            >
+              <font-awesome-icon icon="bell" prefix="fa"/>
+              快捷唤醒
+            </li>
           </template>
           <li
             @click="claimSeat"
@@ -643,6 +650,11 @@ export default {
       this.isMenuOpen = false;
       if (!player.id) return;
       this.$emit("trigger", ["openChat"]);
+    },
+    openDirectedWake(player) {
+      this.isMenuOpen = false;
+      if (!player.id || player.id === "host" || player.id === this.session.playerId) return;
+      this.$emit("trigger", ["openDirectedWake"]);
     },
     /**
      * Allow the ST to override a locked vote.

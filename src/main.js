@@ -12,6 +12,8 @@ const faIcons = [
   "ArrowCircleUp",
   "ArrowCircleDown",
   "ArrowLeft",
+  "Bell",
+  "PaperPlane",
   "Book",
   "BookOpen",
   "BookDead",

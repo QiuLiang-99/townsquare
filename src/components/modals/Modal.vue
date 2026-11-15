@@ -16,6 +16,7 @@
             :icon="['fas', isMaximized ? 'window-minimize' : 'window-maximize']"
           />
           <font-awesome-icon
+            v-if="dismissible"
             @click="close"
             class="top-right-button"
             icon="times-circle"
@@ -39,6 +40,10 @@ export default {
     type: {
       type: String,
       default: ""
+    },
+    dismissible: {
+      type: Boolean,
+      default: true
     }
   },
   data: function() {
@@ -48,9 +53,11 @@ export default {
   },
   methods: {
     close() {
+      if (!this.dismissible) return;
       this.$emit("close");
     },
     closeCheck() {
+      if (!this.dismissible) return;
       // 输入时点击背景不关闭
       if (this.name === "input" && this.type === "input") return;
       this.close();

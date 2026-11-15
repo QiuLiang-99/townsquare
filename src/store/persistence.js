@@ -1,5 +1,12 @@
+const { createSessionStorage } = require("./safeStorage");
+
 module.exports = store => {
   if (window.location.pathname != "/") return;
+  const localStorage = createSessionStorage(() => window.localStorage, () => {
+    if (!store.state.quickWake.storageError) {
+      store.commit("quickWake/setStorageError", "浏览器存储不可用，本次会话仍可继续使用快捷唤醒。");
+    }
+  });
 
   // 安全读取：遇到非法 JSON(如历史遗留的字符串 "undefined"/"null" 或损坏数据)
   // 不抛异常，自动清除该键并返回 fallback，避免初始化崩溃导致整页白屏。

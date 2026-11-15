@@ -19,6 +19,7 @@ class LiveSession {
     this._sendInterval = 1.5 * 1000; // 1.5 seconds between unsent message cycles
     this._sendTimer = null;
     this._reconnectTimer = null;
+    this._quickWakeTimer = null;
     this._players = {}; // map of players connected to a session
     this._pings = {}; // map of player IDs to ping
     // reconnect to previous session
@@ -40,7 +41,7 @@ class LiveSession {
         "/" +
         this._store.state.session.playerId + 
         (!this._isSpectator ? "/host" : "") + 
-        (!this._isSpectator ? "?auth=" + this._store.state.session.stSecret : "")
+        ("?auth=" + encodeURIComponent(this._store.state.session.stSecret))
     );
     if (this._socket === null) {
       this._store.commit("session/setReconnecting", true);
@@ -50,12 +51,25 @@ class LiveSession {
       );
       return;
     }
-    this._socket.addEventListener("message", this._handleMessage.bind(this));
-    this._socket.onopen = this._onOpen.bind(this);
-    this._socket.onclose = err => {
+    const socket = this._socket;
+    const playerId = this._store.state.session.playerId;
+    this._socketContext = { roomId: String(channel), playerId, isSpectator: this._isSpectator };
+    const isCurrent = () => this._socket === socket &&
+      String(this._store.state.session.sessionId) === String(channel) &&
+      this._store.state.session.playerId === playerId;
+    socket.addEventListener("message", event => { if (isCurrent()) this._handleMessage(event); });
+    socket.onopen = () => {
+      if (!isCurrent()) return;
+      this._store.commit("quickWake/setConnected", true);
+      this._onOpen();
+    };
+    socket.onclose = err => {
+      if (!isCurrent()) return;
+      this._store.commit("quickWake/setConnected", false);
       this._socket = null;
       clearTimeout(this._pingTimer);
       this._pingTimer = null;
+      this._stopQuickWakeOutbox();
       if (err.code !== 1000) {
         // connection interrupted, reconnect after 3 seconds
         this._store.commit("session/setReconnecting", true);
@@ -288,6 +302,36 @@ class LiveSession {
       }
     }
     this._ping();
+    this._startQuickWakeOutbox();
+  }
+
+  _sendQuickWakeOutbox() {
+    if (!this._socket || this._socket.readyState !== 1) return;
+    const roomId = this._store.state.session.sessionId;
+    if (!roomId || !this._quickWakeConnectionMatches()) return;
+    const outbox = this._store.state.quickWake.outbox || [];
+    outbox.forEach(item => {
+      if (!item || !item.payload) return;
+      if (item.payload.roomId && String(item.payload.roomId) !== String(roomId)) return;
+      if (item.kind === "message" && !this._isSpectator) {
+        this.sendQuickWakeMessage(item.payload);
+      } else if (item.kind === "reply" && this._isSpectator) {
+        this.sendQuickWakeReply(item.payload);
+      }
+    });
+  }
+
+  _startQuickWakeOutbox() {
+    this._stopQuickWakeOutbox();
+    this._sendQuickWakeOutbox();
+    this._quickWakeTimer = setInterval(() => {
+      this._sendQuickWakeOutbox();
+    }, 2000);
+  }
+
+  _stopQuickWakeOutbox() {
+    clearInterval(this._quickWakeTimer);
+    this._quickWakeTimer = null;
   }
 
   /**
@@ -392,6 +436,30 @@ class LiveSession {
         break;
       case "feedback":
         this._deleteFromQueue(params);
+        break;
+      case "quickWakePresence":
+        this._store.commit("quickWake/setPresence", params);
+        break;
+      case "quickWakeAccepted":
+        this._store.commit("quickWake/applyAccepted", params);
+        break;
+      case "quickWakeStatus":
+        this._store.commit("quickWake/applyStatus", params);
+        break;
+      case "quickWakeSync":
+        this._store.commit("quickWake/syncMessages", params);
+        break;
+      case "quickWakeIncoming":
+        this._handleQuickWakeIncoming(params);
+        break;
+      case "quickWakeReplyAck":
+        this._store.commit("quickWake/applyReplyAck", params);
+        break;
+      case "quickWakeError":
+        this._store.commit("quickWake/failOutbox", {
+          id: params && params.id,
+          message: (params && params.message) || "快捷唤醒发送失败"
+        });
         break;
       case "nomination":
         if (!this._isSpectator) return;
@@ -568,6 +636,7 @@ class LiveSession {
    * Close the current session, if any.
    */
   disconnect() {
+    this._store.commit("quickWake/setConnected", false);
     this._pings = {};
     this._store.commit("session/setPlayerCount", 0);
     this._store.commit("session/setPing", 0);
@@ -575,6 +644,7 @@ class LiveSession {
     clearTimeout(this._reconnectTimer);
     clearTimeout(this._store.state.session.joinTimeout);
     clearTimeout(this._store.state.session.hostTimeout);
+    this._stopQuickWakeOutbox();
     if (this._socket) {
       if (this._isSpectator) {
         this._sendDirect("host", "bye", this._store.state.session.playerId);
@@ -582,6 +652,46 @@ class LiveSession {
       this._socket.close(1000);
       this._socket = null;
     }
+  }
+
+  _quickWakeConnectionMatches() {
+    const context = this._socketContext;
+    const session = this._store.state.session;
+    return !!(context && this._socket && this._socket.readyState === 1 &&
+      context.roomId === String(session.sessionId) && context.playerId === session.playerId &&
+      context.isSpectator === session.isSpectator);
+  }
+
+  sendQuickWakeMessage(message) {
+    if (this._isSpectator || !message || !this._quickWakeConnectionMatches()) return;
+    const session = this._store.state.session;
+    if (message.roomId !== String(session.sessionId) || message.senderPlayerId !== session.playerId) return;
+    if (!this._store.state.players.players.some(player => player.id === message.targetPlayerId)) {
+      this._store.commit("quickWake/failOutbox", { id: message.id, message: "目标玩家已离座，消息未发送。" });
+      return;
+    }
+    this._send("quickWakeSeats", this._store.state.players.players.map(player => player.id).filter(Boolean));
+    this._send("quickWakeSend", message);
+  }
+
+  sendQuickWakeReply(reply) {
+    if (!this._isSpectator || !reply || !this._quickWakeConnectionMatches()) return;
+    if (reply.roomId !== String(this._store.state.session.sessionId) || reply.playerId !== this._store.state.session.playerId) return;
+    this._send("quickWakeReply", reply);
+  }
+
+  sendQuickWakeReceipt(wakeId) {
+    if (!this._isSpectator || !wakeId || !this._quickWakeConnectionMatches()) return;
+    this._send("quickWakeReceipt", {
+      wakeId,
+      roomId: this._store.state.session.sessionId
+    });
+  }
+
+  _handleQuickWakeIncoming(message) {
+    if (!message || message.roomId !== String(this._store.state.session.sessionId) || message.targetPlayerId !== this._store.state.session.playerId) return;
+    this._store.commit("quickWake/receiveIncoming", message);
+    this.sendQuickWakeReceipt(message.id);
   }
 
   /**
@@ -2730,6 +2840,12 @@ export default store => {
         break;
       case "session/setIsRole":
         session.setIsRole(payload);
+        break;
+      case "quickWake/enqueueMessage":
+        session.sendQuickWakeMessage(payload);
+        break;
+      case "quickWake/enqueueReply":
+        session.sendQuickWakeReply(payload);
         break;
     }
   });

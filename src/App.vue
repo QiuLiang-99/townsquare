@@ -44,6 +44,8 @@
     <GroupChatModal/>
     <VersionModal/>
     <QuickWakeModal/>
+    <DirectedWakeModal/>
+    <PlayerWakeModal/>
     <Gradients />
     <!-- <span id="version">v{{ version }}</span> -->
   </div>
@@ -72,6 +74,8 @@ import InputModal from "@/components/modals/InputModal.vue";
 import GroupChatModal from "./components/modals/GroupChatModal.vue";
 import VersionModal from "./components/modals/VersionModal.vue";
 import QuickWakeModal from "./components/modals/QuickWakeModal.vue";
+import DirectedWakeModal from "./components/modals/DirectedWakeModal.vue";
+import PlayerWakeModal from "./components/modals/PlayerWakeModal.vue";
 import WorldLobby from "./components/WorldLobby.vue";
 
 export default {
@@ -96,10 +100,12 @@ export default {
     GroupChatModal,
     VersionModal,
     QuickWakeModal,
+    DirectedWakeModal,
+    PlayerWakeModal,
     Gradients
   },
   computed: {
-    ...mapState(["grimoire", "session", "lobby", "modals"]),
+    ...mapState(["grimoire", "session", "lobby", "modals", "quickWake"]),
     ...mapState("players", ["players"])
   },
   data() {
@@ -183,8 +189,10 @@ export default {
         this.$store.commit("toggleModal", "input");
       });
     },
-    keyup({ key, ctrlKey, metaKey }) {
+    keyup({ key, ctrlKey, metaKey, target }) {
       if (ctrlKey || metaKey) return;
+      if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) && key !== "Escape") return;
+      if (this.$store.getters["quickWake/pendingCount"] > 0) return;
       if (this.session.isTyping && key != "Escape") return;
       switch (key.toLocaleLowerCase()) {
         case "m":
@@ -238,6 +246,7 @@ export default {
           this.$refs.menu.setTimer();
           break;
         case "escape":
+          if (this.quickWake.forceReply) return;
           if (this.modals && this.modals.input) {
             this.$refs.input.close();
           } else {
