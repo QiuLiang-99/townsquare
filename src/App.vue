@@ -32,6 +32,7 @@
     <Menu ref="menu" @trigger="handleTrigger($event)"></Menu>
     <ImageCropper ref="imageCropper"/>
     <EditionModal />
+    <ScriptLibraryModal />
     <FabledModal />
     <RolesModal />
     <DrawModal />
@@ -63,6 +64,7 @@ import RolesModal from "./components/modals/RolesModal";
 import DrawModal from "./components/modals/DrawModal";
 import BlindDrawModal from "./components/modals/BlindDrawModal";
 import EditionModal from "./components/modals/EditionModal";
+import ScriptLibraryModal from "./components/modals/ScriptLibraryModal";
 import Intro from "./components/Intro";
 import ReferenceModal from "./components/modals/ReferenceModal";
 import Vote from "./components/Vote";
@@ -96,6 +98,7 @@ export default {
     Menu,
     ImageCropper,
     EditionModal,
+    ScriptLibraryModal,
     RolesModal,
     DrawModal,
     BlindDrawModal,

@@ -18,6 +18,15 @@
           {{ edition.name }}
         </li>
         <li
+          class="edition edition-scriptlib"
+          @click="openScriptLibrary"
+          :style="{
+            backgroundImage: `url(${require('../../assets/editions/scriptlib.png')})`
+          }"
+        >
+          剧本库
+        </li>
+        <li
           class="edition edition-custom"
           @click="isCustom = true"
           :style="{
@@ -140,6 +149,11 @@ export default {
     closeEdition(){
       this.toggleModal('edition');
       this.isCustom = false;
+    },
+    openScriptLibrary() {
+      this.isCustom = false;
+      this.toggleModal('edition');
+      this.$nextTick(() => this.toggleModal('scriptLibrary'));
     },
     openUpload() {
       this.$refs.upload.click();

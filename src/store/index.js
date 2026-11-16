@@ -144,6 +144,7 @@ export default new Vuex.Store({
       roles: false,
       draw: false,
       blindDraw: false,
+      scriptLibrary: false,
       voteHistory: false,
       input: false,
       groupChat: false,
