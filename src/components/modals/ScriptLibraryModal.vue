@@ -250,7 +250,7 @@
                 >剧本图{{ item.picCount }}</span
               >
               <span
-                v-if="item.picState !== 'complete' && item.picCount"
+                v-if="item.picState !== 'complete'"
                 class="sl-pill sl-pill-warn"
                 >{{ picStateLabel(item.picState) }}</span
               >
@@ -424,14 +424,17 @@ export default {
         const has = f => !!f && files.indexOf(f) >= 0;
         const front = has(sides.front);
         const back = has(sides.back);
-        const picCount = files.length;
+        // 与原站一致：剧本图数量 = 已确认的正面 + 背面（最多 2 张），
+        // 而不是图片文件总数（一本剧本可能附带多张备用图）。
+        const imgTotal = files.length;
+        const picCount = (front ? 1 : 0) + (back ? 1 : 0);
         const picState = front && back
           ? "complete"
           : front
           ? "missing-back"
           : back
           ? "missing-front"
-          : picCount
+          : imgTotal
           ? "ancillary"
           : "missing-images";
         // 角色统计与名称（排除 jinx / token 之类规则条目）
@@ -483,6 +486,9 @@ export default {
           health,
           front,
           back,
+          frontFile: front ? sides.front : "",
+          backFile: back ? sides.back : "",
+          imgTotal,
           picCount,
           picState,
           pills: TEAM_ORDER.filter(t => teamCount[t]).map(t => ({
@@ -608,8 +614,8 @@ export default {
           return false;
         if (c === "incomplete" && it.type === "json" && it.picState === "complete")
           return false;
-        // 有图片 / 只看有剧照
-        if (needPic && !it.picCount) return false;
+        // 有图片 / 只看有剧照（有任意图片即算，含仅附图的情况）
+        if (needPic && !it.imgTotal) return false;
         // 人数初筛：按标准阵营配置检查可选角色数量是否够
         if (setup) {
           const ok = ["townsfolk", "outsider", "minion", "demon"].every(
@@ -870,7 +876,7 @@ export default {
         }
         const raw = full[item.index].t;
         const roles = typeof raw === "string" ? JSON.parse(raw) : raw;
-        this.applyScript(roles);
+        this.applyScript(roles, item);
         this.recordRecent(item);
         this.pickingKey = "";
         this.toggleModal("scriptLibrary");
@@ -880,7 +886,7 @@ export default {
       }
     },
     // 复用 EditionModal 的解析逻辑：把剧本角色数组应用到魔典
-    applyScript(roles) {
+    applyScript(roles, item) {
       if (!roles || !roles.length) return;
       roles = roles.map(role => (typeof role === "string" ? { id: role } : role));
       const metaIndex = roles.findIndex(({ id }) => id === "_meta");
@@ -901,7 +907,19 @@ export default {
         }
       }
       this.$store.commit("setCustomRoles", roles);
-      this.$store.commit("setEdition", Object.assign({}, meta, { id: "custom" }));
+      // 记住剧本库来源：供「下载剧本图」按钮判断该剧本是否来自剧本库、以及正/背面图文件名
+      const libraryMeta = item
+        ? {
+            libraryIndex: item.index,
+            libraryVersion: item.version || "",
+            libraryFront: item.frontFile || "",
+            libraryBack: item.backFile || ""
+          }
+        : {};
+      this.$store.commit(
+        "setEdition",
+        Object.assign({}, meta, libraryMeta, { id: "custom" })
+      );
       if (roles.some(role => this.$store.state.fabled.has(role.id || role))) {
         const fabled = [];
         roles.forEach(role => {

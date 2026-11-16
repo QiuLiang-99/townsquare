@@ -299,6 +299,7 @@ function roomLobbyItem(channel, room) {
     stName: m.stName || "",
     edition: m.edition || "tb",
     editionName: m.editionName || "",
+    editionLogo: m.editionLogo || "",
     maxPlayers: m.maxPlayers || room.playerCount || 0,
   };
 }
@@ -388,6 +389,49 @@ app.post("/upload/avatar", (req, res) => {
     return res.json({ status: "success", avatarUrl });
   } catch (e) {
     log("upload/avatar error", e.stack || e.message);
+    return res.status(500).json({ status: "error", message: "server error" });
+  }
+});
+
+// 剧本图代理下载
+// 7uuu.me 的剧本图没有 CORS 头，浏览器里 fetch 拿不到 blob，无法触发「另存为」。
+// 这里做一个受限的反向代理：只允许剧本图所在域名，避免变成任意 URL 代理。
+const IMAGE_PROXY_HOSTS = ["7uuu.me", "www.7uuu.me"];
+const IMAGE_PROXY_MAX_BYTES = 20 * 1024 * 1024;
+
+app.get("/api/fetch-image", async (req, res) => {
+  try {
+    const raw = typeof req.query.url === "string" ? req.query.url : "";
+    let target;
+    try {
+      target = new URL(raw);
+    } catch (e) {
+      return res.status(400).json({ status: "error", message: "invalid url" });
+    }
+    if (target.protocol !== "https:" || !IMAGE_PROXY_HOSTS.includes(target.hostname)) {
+      return res.status(403).json({ status: "error", message: "host not allowed" });
+    }
+    const upstream = await fetch(target.href, {
+      headers: { referer: "https://7uuu.me/script_lib/", "user-agent": "townsquare-image-proxy" },
+      redirect: "follow",
+    });
+    if (!upstream.ok) {
+      return res.status(502).json({ status: "error", message: `upstream ${upstream.status}` });
+    }
+    const type = upstream.headers.get("content-type") || "application/octet-stream";
+    if (!/^image\//i.test(type)) {
+      return res.status(415).json({ status: "error", message: "not an image" });
+    }
+    const buf = Buffer.from(await upstream.arrayBuffer());
+    if (buf.length > IMAGE_PROXY_MAX_BYTES) {
+      return res.status(413).json({ status: "error", message: "image too large" });
+    }
+    res.setHeader("Content-Type", type);
+    res.setHeader("Content-Length", String(buf.length));
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    return res.end(buf);
+  } catch (e) {
+    log("fetch-image error", e.stack || e.message);
     return res.status(500).json({ status: "error", message: "server error" });
   }
 });
@@ -795,6 +839,10 @@ function routeRoomMessage(ws, command, params, feedback) {
       if (typeof params.stName === "string") clean.stName = params.stName.slice(0, 40);
       if (typeof params.edition === "string") clean.edition = params.edition.slice(0, 32);
       if (typeof params.editionName === "string") clean.editionName = params.editionName.slice(0, 60);
+      // 剧本封面（剧本 JSON 里的 _meta.logo），供大厅展示。只接受 http(s) 绝对地址。
+      if (typeof params.editionLogo === "string" && /^https?:\/\//i.test(params.editionLogo)) {
+        clean.editionLogo = params.editionLogo.slice(0, 512);
+      }
       if (Number.isFinite(params.maxPlayers)) clean.maxPlayers = Math.max(0, Math.min(20, Math.floor(params.maxPlayers)));
       room.meta = Object.assign({}, room.meta, clean);
       // 房间若已在大厅可见，广播更新；否则（首次）按新增处理

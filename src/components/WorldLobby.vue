@@ -19,7 +19,11 @@
           :title="`点击加入房间 ${room.channel}`"
         >
           <div class="wl-cover">
-            <img :src="editionImage(room.edition)" :alt="editionName(room.edition)" />
+            <img
+              :src="coverSrc(room)"
+              :alt="editionName(room.edition, room.editionName)"
+              @error="onCoverError(room)"
+            />
           </div>
           <div class="wl-info">
             <div class="wl-name">{{ room.name || room.channel }}</div>
@@ -46,6 +50,12 @@ const EDITIONS = new Map(editionsJSON.map((e) => [e.id, e]));
 
 export default {
   name: "WorldLobby",
+  data() {
+    return {
+      // 外链封面加载失败的房间（退回内置剧本封面，避免破图）
+      coverErrors: {}
+    };
+  },
   computed: {
     ...mapState("lobby", ["roomList"]),
     rooms() {
@@ -67,6 +77,17 @@ export default {
       } catch (e) {
         return require("../assets/editions/custom.png");
       }
+    },
+    // 优先用剧本 JSON 里的封面（_meta.logo），加载失败则退回内置封面
+    coverSrc(room) {
+      const ch = String(room.channel);
+      if (room.editionLogo && !this.coverErrors[ch]) return room.editionLogo;
+      return this.editionImage(room.edition);
+    },
+    onCoverError(room) {
+      const ch = String(room.channel);
+      if (!room.editionLogo || this.coverErrors[ch]) return;
+      this.$set(this.coverErrors, ch, true);
     },
     enterRoom(room) {
       this.$emit("enterRoom", room);
@@ -152,16 +173,18 @@ export default {
 
 .wl-cover {
   flex: none;
-  width: 74px;
+  // 剧本封面多为横幅/长条图，用扁一点的框 + contain，避免被裁成方形只剩中间一块
+  width: 104px;
   height: 74px;
   border-radius: 8px;
   overflow: hidden;
-  background: #111;
+  background: #0b0b0b;
   box-shadow: 0 0 6px black;
   img {
+    display: block;
     width: 100%;
     height: 100%;
-    object-fit: cover;
+    object-fit: contain;
   }
 }
 

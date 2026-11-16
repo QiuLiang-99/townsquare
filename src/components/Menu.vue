@@ -279,6 +279,19 @@
               夜间顺序表
               <em>[N]</em>
             </li>
+            <li
+              @click="downloadScriptImage"
+              :class="{ disabled: downloadingImage }"
+            >
+              下载剧本图
+              <em>
+                <font-awesome-icon
+                  :icon="['fas', downloadingImage ? 'spinner' : 'download']"
+                  :spin="downloadingImage"
+                />
+              </em>
+            </li>
+            <li v-if="downloadMsg" class="download-hint">{{ downloadMsg }}</li>
           </div>
         </template>
 
@@ -510,6 +523,83 @@
 import { mapMutations, mapState } from "vuex";
 import { nextTick } from 'vue';
 
+// ---- 剧本图（7uuu 剧本库）相关工具 ----
+// 原站图片真实地址在预览清单里：assets/data/image-previews.js 的
+// window.ScriptImagePreviews.entries[`版本/文件名`] = { file: "<hash>.webp" }，
+// 实际图片 = assets/previews/<hash>.webp。清单按需加载一次。
+const PREVIEWS_MANIFEST = "https://7uuu.me/script_lib/assets/data/image-previews.js";
+const PREVIEWS_BASE = "https://7uuu.me/script_lib/assets/previews/";
+let previewsPromise = null;
+
+function loadImagePreviews() {
+  if (window.ScriptImagePreviews && window.ScriptImagePreviews.entries) {
+    return Promise.resolve(window.ScriptImagePreviews.entries);
+  }
+  if (!previewsPromise) {
+    previewsPromise = new Promise((resolve, reject) => {
+      const el = document.createElement("script");
+      el.src = PREVIEWS_MANIFEST + "?t=" + Date.now();
+      el.async = true;
+      el.onload = () => {
+        const entries = (window.ScriptImagePreviews || {}).entries;
+        if (entries) resolve(entries);
+        else reject(new Error("剧本图清单为空"));
+      };
+      el.onerror = () => reject(new Error("剧本图清单加载失败，请检查网络"));
+      document.head.appendChild(el);
+    }).catch(err => {
+      previewsPromise = null;
+      throw err;
+    });
+  }
+  return previewsPromise;
+}
+
+function previewURLOf(entries, version, fileName) {
+  if (!entries || !fileName) return "";
+  const direct = entries[`${version || ""}/${fileName}`];
+  if (direct && direct.file) return PREVIEWS_BASE + direct.file;
+  // 版本串对不上时，退化为按文件名匹配
+  const suffix = "/" + fileName;
+  for (const key of Object.keys(entries)) {
+    if (key.endsWith(suffix) && entries[key] && entries[key].file) {
+      return PREVIEWS_BASE + entries[key].file;
+    }
+  }
+  return "";
+}
+
+// 跨域图片无法用 <a download> 直接保存：先走本站代理，失败再试直连，最后新窗口打开。
+async function saveRemoteImage(url, fileName) {
+  let blob = null;
+  try {
+    const res = await fetch("/api/fetch-image?url=" + encodeURIComponent(url));
+    if (res.ok) blob = await res.blob();
+  } catch (e) {
+    // 忽略，走直连兜底
+  }
+  if (!blob) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) blob = await res.blob();
+    } catch (e) {
+      // 被 CORS 挡，落到下面的兜底
+    }
+  }
+  if (!blob) {
+    window.open(url, "_blank", "noopener");
+    throw new Error("无法直接下载，已在新窗口打开图片，请右键另存为");
+  }
+  const objectURL = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectURL;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(objectURL), 10000);
+}
+
 export default {
   computed: {
     ...mapState(["grimoire", "session", "lobby", "edition", "channels", "selectedEditions", "buildVersion", "roles"]),
@@ -534,6 +624,12 @@ export default {
       console.log(deviceType);
       if (/mobile|android|touch|webos|iphone|ipod/i.test(deviceType)) return true;
       return false;
+    },
+    // 当前剧本是否来自剧本库导入、且标注了剧本图（正面/背面）
+    canDownloadScriptImage() {
+      const ed = this.edition || {};
+      const fromLibrary = ed.libraryIndex !== undefined && ed.libraryIndex !== null;
+      return fromLibrary && !!(ed.libraryFront || ed.libraryBack);
     },
     // 构建时注入的最后更新时间（见 vue.config.js 的 __BUILD_TIME__），格式化成本地可读时间
     buildTimeText() {
@@ -579,6 +675,8 @@ export default {
         lycanthrope: false
       },
       recognition: null,
+      downloadingImage: false,
+      downloadMsg: "",
       microphoneSetting: "free",
       // 语音检测
       audioContext: null,
@@ -601,6 +699,37 @@ export default {
     }
   },
   methods: {
+    // 下载当前剧本的剧本图（角色表优先：背面是角色表，没有背面就用正面）
+    async downloadScriptImage() {
+      if (this.downloadingImage) return;
+      if (!this.canDownloadScriptImage) {
+        this.flashDownloadMsg("当前剧本不是从剧本库导入的，没有剧本图可下载");
+        return;
+      }
+      const ed = this.edition;
+      const file = ed.libraryBack || ed.libraryFront;
+      const label = ed.libraryBack ? "角色表" : "封面";
+      this.downloadingImage = true;
+      this.downloadMsg = "";
+      try {
+        const entries = await loadImagePreviews();
+        const url = previewURLOf(entries, ed.libraryVersion, file);
+        if (!url) throw new Error("没有找到这张剧本图的在线地址");
+        await saveRemoteImage(url, `${(ed.name || "剧本").trim()}-${label}.webp`);
+        this.flashDownloadMsg("已开始下载");
+      } catch (e) {
+        this.flashDownloadMsg(e && e.message ? e.message : "下载失败");
+      } finally {
+        this.downloadingImage = false;
+      }
+    },
+    flashDownloadMsg(msg) {
+      this.downloadMsg = msg;
+      clearTimeout(this._downloadMsgTimer);
+      this._downloadMsgTimer = setTimeout(() => {
+        this.downloadMsg = "";
+      }, 5000);
+    },
     async showInputModal({ inputType, inputModal, inputData }) {
       return new Promise((resolve, reject) => {
         this.$store.commit("session/setInputResolver", resolve);
@@ -1667,6 +1796,25 @@ export default {
       font-size: 80%;
       opacity: 0.7;
       padding-left: 6px;
+    }
+
+    // 「下载剧本图」的状态提示
+    .download-hint {
+      cursor: default;
+      font-size: 75%;
+      line-height: 1.35;
+      color: rgba(255, 255, 255, 0.7);
+      background: rgba(0, 0, 0, 0.5);
+      padding: 4px 8px;
+
+      &:hover {
+        color: rgba(255, 255, 255, 0.7);
+      }
+    }
+
+    li.disabled {
+      opacity: 0.5;
+      pointer-events: none;
     }
   }
 }

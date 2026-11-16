@@ -27,6 +27,7 @@ const faIcons = [
   "Copy",
   "Clipboard",
   "Dice",
+  "Download",
   "Dragon",
   "Eraser",
   "ExchangeAlt",

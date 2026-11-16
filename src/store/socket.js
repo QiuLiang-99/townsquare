@@ -865,6 +865,8 @@ class LiveSession {
       stName: session.playerName || "",
       edition: edition.id || "tb",
       editionName: edition.name || "",
+      // 剧本封面：自定义/剧本库导入的剧本在 _meta.logo 里带了封面图
+      editionLogo: /^https?:\/\//i.test(edition.logo || "") ? edition.logo : "",
       maxPlayers: players.length
     });
   }
