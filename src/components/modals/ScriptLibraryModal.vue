@@ -62,35 +62,22 @@
           </option>
         </select>
       </label>
+      <label class="sl-select sl-quick-author">
+        <span class="sl-select-label">作者</span>
+        <select v-model="authorFilter">
+          <option value="">不限作者</option>
+          <option value="museum">博物馆</option>
+        </select>
+      </label>
     </div>
 
     <!-- 更多筛选 -->
     <div class="sl-advanced" :class="{ open: more }">
       <button type="button" class="sl-adv-toggle" @click="more = !more">
-        <span>更多筛选 <span class="sl-adv-hint">角色、分类、人数</span></span>
+        <span>更多筛选 <span class="sl-adv-hint">阵营、分类、人数</span></span>
         <span class="sl-adv-caret">{{ more ? "▴" : "▾" }}</span>
       </button>
       <div class="sl-adv-body" v-if="more">
-        <div class="sl-role-fields">
-          <label>
-            必须包含的角色
-            <input
-              type="text"
-              v-model="includeRoles"
-              placeholder="例如：洗衣妇、僧侣（全部包含）"
-            />
-          </label>
-          <label>
-            排除的角色
-            <input
-              type="text"
-              v-model="excludeRoles"
-              placeholder="例如：酒鬼、间谍（任一命中即排除）"
-            />
-          </label>
-          <small>使用顿号、逗号或换行分隔；按完整角色名匹配。</small>
-        </div>
-
         <div class="sl-filter-fields">
           <label>
             排序方式
@@ -366,10 +353,10 @@ export default {
       quickFavorites: false,
       playerCount: "",
       playerOptions: [7, 8, 9, 10, 11, 12, 13, 14, 15],
+      // 作者（来源账号）："" = 不限作者，"museum" = 博物馆（7uuu 从 B 站「钟楼剧本博物馆」自动同步的图文剧本）
+      authorFilter: "",
       // 更多筛选
       more: false,
-      includeRoles: "",
-      excludeRoles: "",
       sort: "name",
       team: "",
       minc: "",
@@ -460,12 +447,23 @@ export default {
         const name = (s[F_NAME] || "").replace(/^#/, "").trim();
         const author = s[F_AUTHOR] || "";
         const category = s[F_CAT] || "";
+        // 博物馆：7uuu 从 B 站「钟楼剧本博物馆」自动同步的图文剧本
+        // （分类为「B站图文自动同步」，版本号形如 bili-cv53942036）
+        const museum = category === "B站图文自动同步";
+        // cv 号：同一篇文章的编号在 [3] 路径 / [8] 来源 / [9] 版本号里各出现一次，取第一个能解析到的
+        const cvRaw =
+          String(s[F_VERSION] || "").match(/cv(\d+)/) ||
+          String(s[F_URL] || "").match(/cv(\d+)/) ||
+          String(s[3] || "").match(/cv(\d+)/);
+        const cv = cvRaw ? parseInt(cvRaw[1], 10) : 0;
         out.push({
           key: i,
           index: i,
           name,
           author,
           category,
+          museum,
+          cv,
           playerCount: charCount,
           charCount,
           teamCount,
@@ -576,13 +574,6 @@ export default {
       return `${this.category} · 包含下级，共 ${node.count} 个剧本`;
     },
     filtered() {
-      const splitTerms = text =>
-        String(text || "")
-          .split(/[、,，;；\n]+/)
-          .map(t => t.normalize("NFKC").trim().toLowerCase())
-          .filter(Boolean);
-      const include = splitTerms(this.includeRoles);
-      const exclude = splitTerms(this.excludeRoles);
       const mn = parseInt(this.minc, 10);
       const mx = parseInt(this.maxc, 10);
       const setup = PLAYER_SETUPS[this.playerCount];
@@ -594,12 +585,8 @@ export default {
         this.quickFavorites || this.personal === "any" || this.personal === "favorite";
 
       let list = this.items.filter(it => {
-        // 必须包含 / 排除的角色（按完整角色名匹配）
-        if (include.length || exclude.length) {
-          const names = it.roleNames;
-          if (!include.every(n => names.has(n))) return false;
-          if (exclude.some(n => names.has(n))) return false;
-        }
+        // 作者（来源）：博物馆 = 从 B 站「钟楼剧本博物馆」自动同步的剧本
+        if (this.authorFilter === "museum" && !it.museum) return false;
         // 可用状态
         if (this.availability && it.health !== this.availability) return false;
         // 完整度
@@ -654,7 +641,10 @@ export default {
       });
 
       list = list.slice();
-      if (this.sort === "size") {
+      if (this.authorFilter === "museum") {
+        // 博物馆：按 cv 号倒序（数字越大越新），不受「排序方式」影响
+        list.sort((a, b) => b.cv - a.cv || a.name.localeCompare(b.name, "zh"));
+      } else if (this.sort === "size") {
         list.sort(
           (a, b) =>
             b.charCount - a.charCount ||
@@ -686,8 +676,7 @@ export default {
         this.quickPictures,
         this.quickFavorites,
         this.playerCount,
-        this.includeRoles,
-        this.excludeRoles,
+        this.authorFilter,
         this.team,
         this.minc,
         this.maxc,
@@ -1086,6 +1075,9 @@ $border: rgba(0, 0, 0, 0.9);
   .sl-quick-players {
     flex: 0 1 160px;
   }
+  .sl-quick-author {
+    flex: 0 1 160px;
+  }
 }
 .sl-toggle {
   border: 2px solid $border;
@@ -1142,43 +1134,6 @@ $border: rgba(0, 0, 0, 0.9);
 }
 .sl-adv-body {
   padding: 0 10px 10px;
-}
-
-.sl-role-fields {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px 10px;
-  margin-bottom: 8px;
-  @media (max-width: 640px) {
-    grid-template-columns: 1fr;
-  }
-  label {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.45);
-  }
-  input {
-    background: rgba(0, 0, 0, 0.4);
-    border: 2px solid $border;
-    border-radius: 6px;
-    color: #eee;
-    padding: 5px 8px;
-    font-size: 13px;
-    outline: none;
-    &::placeholder {
-      color: rgba(255, 255, 255, 0.25);
-    }
-    &:focus {
-      border-color: rgba(246, 214, 106, 0.5);
-    }
-  }
-  small {
-    grid-column: 1 / -1;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.28);
-  }
 }
 
 .sl-filter-fields {
