@@ -102,9 +102,12 @@
 <script>
 import Modal from "./Modal";
 import { mapMutations, mapState } from "vuex";
+import { roleIconUrl } from "../../logic/roleIcon";
+import iconMixin from "../../logic/iconMixin";
 
 export default {
   name: "NightWakeModal",
+  mixins: [iconMixin],
   components: { Modal },
   data() {
     return {
@@ -234,14 +237,8 @@ export default {
         // 爪牙/恶魔信息用阵营占位图（evil）
         return { backgroundImage: `url(${this.safeIcon("evil")})` };
       }
-      // 与 Token.vue / 座位牌一致：自定义角色优先用角色自带图片(role.image)，
-      // 仅在图片显示开关打开时使用；否则回退到内置图标(imageAlt 或角色 id)。
-      // 之前漏了 role.image 这一层，导致带自定义图片的角色被画成阵营占位拇指图。
-      if (role.image && this.grimoire.isImageOptIn) {
-        return { backgroundImage: `url(${role.image})` };
-      }
-      const id = role.imageAlt || (role.id || "").replace(/old1$/, "");
-      const url = this.safeIcon(id);
+      // 与 Token.vue / 座位牌一致：统一走 roleIconUrl（支持「角色图标强制加载」用 BWIKI 图床）
+      const url = roleIconUrl(role, this.grimoire, this.iconStatusRev);
       return url ? { backgroundImage: `url(${url})` } : {};
     },
     // 与现有夜间顺序表一致：从 assets/icons 里 require，缺图返回空

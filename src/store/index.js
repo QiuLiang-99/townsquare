@@ -111,7 +111,7 @@ export default new Vuex.Store({
     quickWake
   },
   state: {
-    version: "3.4.3",
+    version: "3.4.4",
     buildVersion: "",
     latestVersion: "",
     lastVersion: "",
@@ -124,6 +124,11 @@ export default new Vuex.Store({
       isStatic: false,
       isMuted: false,
       isImageOptIn: true,
+      // 角色图标强制加载（仅本地生效）：勾选后不再使用剧本 JSON 自带的 image，
+      // 改用钟楼剧本博物馆 BWIKI 图床里该角色的照片直链。
+      forceWikiIcon: false,
+      // BWIKI 图床「文件名 → 直链」映射，首次启用时从后端 /api/wiki-icons 拉取并按需缓存
+      wikiIcons: null,
       isForwardEvilInfo: false,
       zoom: 0,
       background: "",
@@ -247,6 +252,10 @@ export default new Vuex.Store({
     },
     toggleGrimoire: toggle("isPublic"),
     toggleImageOptIn: toggle("isImageOptIn"),
+    toggleForceWikiIcon: toggle("forceWikiIcon"),
+    setWikiIcons(state, map) {
+      state.grimoire.wikiIcons = map || null;
+    },
     toggleForwardEvilInfo:toggle("isForwardEvilInfo"),
     toggleModal({ modals }, name) {
       if (this.getters["quickWake/pendingCount"] > 0) {
@@ -446,6 +455,20 @@ export default new Vuex.Store({
 
       // 3) 夜次回到第一夜（夜间唤醒助手）
       commit("setDefaultNight");
+    },
+    // 懒加载 BWIKI 角色图标索引（仅在启用「角色图标强制加载」时按需拉取一次）
+    async ensureWikiIcons({ state, commit }) {
+      if (state.grimoire.wikiIcons) return state.grimoire.wikiIcons;
+      try {
+        const apiBase = window.__TS_API__ || window.location.origin;
+        const res = await fetch(apiBase + "/api/wiki-icons");
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        const data = await res.json();
+        if (data && data.map) commit("setWikiIcons", data.map);
+        return state.grimoire.wikiIcons;
+      } catch (e) {
+        return null;
+      }
     },
     async fetchInit() {
       try {

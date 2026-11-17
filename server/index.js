@@ -436,6 +436,70 @@ app.get("/api/fetch-image", async (req, res) => {
   }
 });
 
+// BWIKI 角色图标索引
+// 「角色图标强制加载」：前端需要「文件名 → 图床直链」映射，改用钟楼剧本博物馆 WIKI 的角色照片。
+// wiki 的 api.php 有反爬（缺 UA/Referer 会返回 567），浏览器无法自定义这两个头，所以由服务端代拉。
+// 结果在内存里缓存（默认 24 小时），按需刷新。
+const WIKI_API = "https://wiki.biligame.com/jbzlbwgwjcygf/api.php";
+const WIKI_HEADERS = {
+  referer: "https://wiki.biligame.com/jbzlbwgwjcygf/",
+  "user-agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+};
+const WIKI_CACHE_TTL = 24 * 60 * 60 * 1000;
+let wikiIconCache = null; // { map, at }
+
+async function buildWikiIconMap() {
+  const map = {};
+  let cont = "";
+  for (let i = 0; i < 40; i++) {
+    const u = new URL(WIKI_API);
+    u.searchParams.set("action", "query");
+    u.searchParams.set("list", "allimages");
+    u.searchParams.set("ailimit", "500");
+    u.searchParams.set("aiprop", "url");
+    u.searchParams.set("format", "json");
+    if (cont) u.searchParams.set("aicontinue", cont);
+    const r = await fetch(u.href, { headers: WIKI_HEADERS });
+    if (!r.ok) throw new Error("wiki api " + r.status);
+    const t = await r.json();
+    const list = (t.query && t.query.allimages) || [];
+    for (const f of list) {
+      const m = /^(.*)\.(png|jpg|jpeg|gif|webp)$/i.exec(f.name || "");
+      if (!m) continue;
+      const base = m[1];
+      const ext = m[2].toLowerCase();
+      // 同名文件优先 png（角色图标通常是 png）
+      if (!map[base] || (ext === "png" && !/\.png$/i.test(map[base] || ""))) {
+        map[base] = f.url;
+      }
+    }
+    cont = t.continue && t.continue.aicontinue;
+    if (!cont) break;
+  }
+  return map;
+}
+
+app.get("/api/wiki-icons", async (req, res) => {
+  try {
+    const expired = !wikiIconCache || Date.now() - wikiIconCache.at > WIKI_CACHE_TTL;
+    if (expired || req.query.refresh === "1") {
+      const map = await buildWikiIconMap();
+      wikiIconCache = { map, at: Date.now() };
+      log("wiki icons refreshed", Object.keys(map).length);
+    }
+    res.setHeader("Cache-Control", "public, max-age=3600");
+    return res.json({
+      status: "success",
+      count: Object.keys(wikiIconCache.map).length,
+      map: wikiIconCache.map,
+    });
+  } catch (e) {
+    log("wiki-icons error", e.stack || e.message);
+    return res.status(502).json({ status: "error", message: "wiki fetch failed" });
+  }
+});
+
 // 头像静态资源
 app.use("/avatars", express.static(AVATAR_DIR, { maxAge: "7d" }));
 

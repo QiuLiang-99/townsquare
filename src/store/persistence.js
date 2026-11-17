@@ -56,6 +56,11 @@ module.exports = store => {
   if (localStorage.getItem("imageOptIn")) {
     store.commit("toggleImageOptIn", true);
   }
+  if (localStorage.getItem("forceWikiIcon")) {
+    store.commit("toggleForceWikiIcon", true);
+    // 恢复后按需拉取图床索引，保证刷新后角色图标仍是 wiki 图
+    store.dispatch("ensureWikiIcons");
+  }
   if (localStorage.getItem("zoom")) {
     store.commit("setZoom", parseFloat(localStorage.getItem("zoom")));
   }
@@ -290,6 +295,13 @@ module.exports = store => {
           localStorage.setItem("imageOptIn", 1);
         } else {
           localStorage.removeItem("imageOptIn");
+        }
+        break;
+      case "toggleForceWikiIcon":
+        if (state.grimoire.forceWikiIcon) {
+          localStorage.setItem("forceWikiIcon", 1);
+        } else {
+          localStorage.removeItem("forceWikiIcon");
         }
         break;
       case "setZoom":

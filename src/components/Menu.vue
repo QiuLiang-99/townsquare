@@ -343,6 +343,16 @@
                   ]"
               /></em>
             </li>
+            <li @click="toggleForceWikiIcon">
+              <small>角色图标强制加载</small>
+              <em
+                ><font-awesome-icon
+                  :icon="[
+                    'fas',
+                    grimoire.forceWikiIcon ? 'check-square' : 'square'
+                  ]"
+              /></em>
+            </li>
             <li @click="clearLocalStorage">
               清空储存
               <em
@@ -1099,6 +1109,13 @@ export default {
 
       if (this.grimoire.isImageOptIn || popup === true) {
         this.toggleImageOptIn();
+      }
+    },
+    // 「角色图标强制加载」：只对本地生效。开启时按需拉取 BWIKI 图床索引。
+    toggleForceWikiIcon() {
+      this.$store.commit("toggleForceWikiIcon");
+      if (this.grimoire.forceWikiIcon) {
+        this.$store.dispatch("ensureWikiIcons");
       }
     },
     async joinSession() {
