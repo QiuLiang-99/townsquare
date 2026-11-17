@@ -288,15 +288,7 @@
       >
         <span
           class="icon"
-          :style="{
-            backgroundImage: `url(${
-              reminder.image && grimoire.isImageOptIn
-                ? reminder.image
-                : require('../assets/icons/' +
-                    (reminder.imageAlt || reminder.role.replace(/old1$/, '')) +
-                    '.png')
-            })`
-          }"
+          :style="{ backgroundImage: `url(${reminderIconUrl(reminder, grimoire, roles, iconStatusRev)})` }"
         ></span>
         <span class="text">{{ reminder.name }}</span>
       </div>
@@ -311,10 +303,13 @@
 <script>
 import Token from "./Token";
 import { sweepAndCommit, describeRemoved } from "../logic/reminders";
+import { reminderIconUrl } from "../logic/roleIcon";
+import iconMixin from "../logic/iconMixin";
 import { mapGetters, mapState } from "vuex";
 // import Vue from "vue";
 
 export default {
+  mixins: [iconMixin],
   components: {
     Token
   },
@@ -326,7 +321,7 @@ export default {
   },
   computed: {
     ...mapState("players", ["players"]),
-    ...mapState(["grimoire", "session"]),
+    ...mapState(["grimoire", "session", "roles"]),
     ...mapGetters({ nightOrder: "players/nightOrder" }),
     index: function() {
       return this.players.indexOf(this.player);
@@ -428,6 +423,7 @@ export default {
     }
   },
   methods: {
+    reminderIconUrl,
     async showInputModal({ inputType, inputModal, inputData }) {
       return new Promise((resolve, reject) => {
         this.$store.commit("session/setInputResolver", resolve);

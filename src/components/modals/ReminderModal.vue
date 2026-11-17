@@ -14,15 +14,7 @@
       >
         <span
           class="icon"
-          :style="{
-            backgroundImage: `url(${
-              reminder.image && grimoire.isImageOptIn
-                ? reminder.image
-                : require('../../assets/icons/' +
-                    (reminder.imageAlt || reminder.role.replace(/old1$/, '')) +
-                    '.png')
-            })`
-          }"
+          :style="{ backgroundImage: `url(${reminderIconUrl(reminder, grimoire, roles, iconStatusRev)})` }"
         ></span>
         <span class="text">{{ reminder.name }}</span>
       </li>
@@ -32,6 +24,8 @@
 
 <script>
 import Modal from "./Modal";
+import { reminderIconUrl } from "../../logic/roleIcon";
+import iconMixin from "../../logic/iconMixin";
 import { mapMutations, mapState } from "vuex";
 
 /**
@@ -47,6 +41,7 @@ const mapReminder = ({ id, image, imageAlt }) => name => ({
 });
 
 export default {
+  mixins: [iconMixin],
   components: { Modal },
   props: ["playerIndex"],
   computed: {
@@ -87,10 +82,11 @@ export default {
       reminders.push({ role: "custom", name: "自定义" });
       return reminders;
     },
-    ...mapState(["modals", "grimoire", "session"]),
+    ...mapState(["modals", "grimoire", "session", "roles"]),
     ...mapState("players", ["players"])
   },
   methods: {
+    reminderIconUrl,
     async showInputModal({ inputType, inputModal, inputData }) {
       return new Promise((resolve, reject) => {
         this.$store.commit("session/setInputResolver", resolve);

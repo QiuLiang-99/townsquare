@@ -109,6 +109,29 @@ function firstOk(list) {
   return "";
 }
 
+// 标记（reminder / 说书人 token）的图标：
+// 标记里的 role 是角色 id（不是名字），需要先按 id 从 roles 表里取出角色，
+// 才能在图床映射里查到该角色对应的直链。
+export function reminderIconUrl(reminder, grimoire, roles) {
+  if (!reminder) return "";
+  const imageOptIn = !grimoire || grimoire.isImageOptIn;
+  const jsonImage = reminder.image && imageOptIn ? reminder.image : "";
+  const roleId = String(reminder.role || "");
+  const role =
+    roles && typeof roles.get === "function" ? roles.get(roleId) : null;
+
+  if (grimoire && grimoire.forceWikiIcon) {
+    const wiki = role ? lookupWiki(grimoire.wikiIcons, role) : "";
+    const hit = firstOk([wiki, jsonImage]);
+    if (hit) return hit;
+    return localIcon({ id: roleId, imageAlt: reminder.imageAlt });
+  }
+
+  const hit = firstOk([jsonImage]);
+  if (hit) return hit;
+  return localIcon({ id: roleId, imageAlt: reminder.imageAlt });
+}
+
 export function roleIconUrl(role, grimoire) {
   if (!role || !role.id) return "";
   const imageOptIn = !grimoire || grimoire.isImageOptIn;
