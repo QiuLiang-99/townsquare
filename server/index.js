@@ -698,6 +698,7 @@ function handleRoomConnection(ws, pathname, req) {
         players: new Map(),
         createdAt: Date.now(),
         everHadHost: false,
+        standbyHosts: [], // 同一说书人身份重复打开的说书人网页（只提示，不代关）
         meta: {},
         quickWake: { records: new Map(), order: [] },
         lastGs: null, // 缓存说书人最近一次广播的 gs（含座位表），供新加入者补发
@@ -723,6 +724,28 @@ function handleRoomConnection(ws, pathname, req) {
       try {
         ws.close(4009, "host identity mismatch");
       } catch {}
+      return;
+    }
+    // 同一说书人（同浏览器多标签共享同一个 stSecret）又开了一个说书人网页：
+    // 只提示用户自己关闭一个，绝不替用户关闭；先到的页面保持权威，后来的作为待命，
+    // 待命页面的游戏指令一律丢弃（见 routeRoomMessage），不会和权威页面打架。
+    if (
+      room.host &&
+      room.host.ws !== ws &&
+      room.host.auth === auth &&
+      room.host.ws &&
+      room.host.ws.readyState === 1
+    ) {
+      if (!Array.isArray(room.standbyHosts)) room.standbyHosts = [];
+      room.standbyHosts = room.standbyHosts.filter((s) => s.ws && s.ws.readyState === 1 && s.ws !== ws);
+      room.standbyHosts.push({ ws, playerId, auth, connectedAt: Date.now() });
+      ws._standbyHost = true;
+      const dupMsg = "检测到多个说书人网页，请关闭一个。";
+      send(ws, "alertPopup", dupMsg);
+      send(room.host.ws, "alertPopup", dupMsg);
+      send(ws, "allowHost", true);
+      sendQuickWakeSnapshot(ws, room);
+      log("duplicate host -> standby channel", channel, "playerId", playerId);
       return;
     }
     room.hostAuth = auth;
@@ -803,6 +826,10 @@ function routeRoomMessage(ws, command, params, feedback) {
   if (!meta) return;
   const room = rooms.get(meta.channel);
   if (!room) return;
+
+  // 待命说书人（同一说书人身份重复打开的网页）：不参与任何房间写入或广播，
+  // 只放行 ping（延迟统计）与 request（checkAllowHost 心跳），其余游戏指令全部丢弃。
+  if (ws._standbyHost && command !== "ping" && command !== "request") return;
 
   switch (command) {
     case "quickWakeSeats": {
@@ -1204,6 +1231,17 @@ function handleRequest(ws, room, meta, subCommand, playerId, subParams, feedback
         send(ws, "allowHost", false);
         break;
       }
+      // 同一 stSecret 的第二个说书人网页（待命）：允许加入，只由前端提示，不强制关闭
+      if (room.host && room.host.ws !== ws && room.host.auth === meta.auth) {
+        if (!Array.isArray(room.standbyHosts)) room.standbyHosts = [];
+        if (!room.standbyHosts.some((s) => s.ws === ws)) {
+          room.standbyHosts = room.standbyHosts.filter((s) => s.ws && s.ws.readyState === 1);
+          room.standbyHosts.push({ ws, playerId: meta.playerId, auth: meta.auth, connectedAt: Date.now() });
+        }
+        ws._standbyHost = true;
+        send(ws, "allowHost", true);
+        break;
+      }
       // 说书人请求开房：若已有其它 host 则拒绝
       if (
         (room.host && room.host.ws !== ws) ||
@@ -1277,8 +1315,28 @@ function onWsClose(ws) {
         room.host = null;
         room.hostLeftAt = Date.now();
         log("host leave channel", meta.channel);
+        // 若还有同身份的待命说书人网页（未被用户关掉），自动升为权威，避免房间悬空。
+        // 注意：这只是"接管"，不是替用户关闭任何页面。
+        if (Array.isArray(room.standbyHosts)) {
+          room.standbyHosts = room.standbyHosts.filter((s) => s.ws && s.ws.readyState === 1);
+          const next = room.standbyHosts.shift();
+          if (next) {
+            next.ws._standbyHost = false;
+            room.host = { ws: next.ws, playerId: next.playerId, auth: next.auth, connectedAt: Date.now() };
+            room.hostIdentity = { playerId: next.playerId, auth: next.auth };
+            room.everHadHost = true;
+            cancelRoomCleanup(meta.channel);
+            send(next.ws, "allowHost", true);
+            log("standby host promoted channel", meta.channel, "playerId", next.playerId);
+          }
+        }
         // 说书人暂时离开（可能是网络抖动/隧道断连重连）：保留房间一段宽限期，
         // 避免瞬间删除房间导致其它玩家加入时报"房间不存在"。
+      } else if (ws._standbyHost) {
+        if (Array.isArray(room.standbyHosts)) {
+          room.standbyHosts = room.standbyHosts.filter((s) => s.ws !== ws);
+        }
+        log("standby host leave channel", meta.channel);
       } else if (!meta.isHost) {
         const p = room.players.get(meta.playerId);
         if (p && p.ws === ws) {
