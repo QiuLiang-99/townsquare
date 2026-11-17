@@ -1,17 +1,14 @@
 import Vue from "vue";
 import Vuex from "vuex";
 import persistence from "./persistence";
-import quickWakePersistence from "./quickWakePersistence";
 import socket from "./socket";
 import players from "./modules/players";
 import session from "./modules/session";
 import lobby from "./modules/lobby";
-import quickWake from "./modules/quickWake";
 import editionJSON from "../editions.json";
 import rolesJSON from "../roles.json";
 import fabledJSON from "../fabled.json";
 import jinxesJSON from "../hatred.json";
-import { identityReminders } from "../logic/reminders";
 
 Vue.use(Vuex);
 
@@ -107,12 +104,10 @@ export default new Vuex.Store({
   modules: {
     players,
     session,
-    lobby,
-    quickWake
+    lobby
   },
   state: {
-    version: "3.4.4",
-    buildVersion: "",
+    version: "3.3.1",
     latestVersion: "",
     lastVersion: "",
     floatingNotice: "",
@@ -124,17 +119,10 @@ export default new Vuex.Store({
       isStatic: false,
       isMuted: false,
       isImageOptIn: true,
-      // 角色图标强制加载（仅本地生效）：勾选后不再使用剧本 JSON 自带的 image，
-      // 改用钟楼剧本博物馆 BWIKI 图床里该角色的照片直链。
-      forceWikiIcon: false,
-      // BWIKI 图床「文件名 → 直链」映射，首次启用时从后端 /api/wiki-icons 拉取并按需缓存
-      wikiIcons: null,
       isForwardEvilInfo: false,
       zoom: 0,
       background: "",
-      audioThreshold: 150,
-      // 夜间唤醒助手：当前第几夜（1 = 首夜）。持久化到 localStorage，刷新不丢。
-      night: 1
+      audioThreshold: 150
     },
     modals: {
       version: false,
@@ -142,20 +130,15 @@ export default new Vuex.Store({
       fabled: false,
       gameState: false,
       nightOrder: false,
-      nightWake: false,
       reference: false,
       reminder: false,
       role: false,
       roles: false,
       draw: false,
-      blindDraw: false,
-      scriptLibrary: false,
       voteHistory: false,
       input: false,
       groupChat: false,
-      quick: false,
-      directedWake: false,
-      playerWake: false
+      quick: false
     },
     edition: editionJSONbyId.get("tb"),
     selectedEditions: {
@@ -229,9 +212,6 @@ export default new Vuex.Store({
     setLastVersion(state, val) {
       state.lastVersion = val;
     },
-    setBuildVersion(state, val) {
-      state.buildVersion = val;
-    },
     setFloatingNotice(state, val) {
       state.floatingNotice = val;
     },
@@ -241,28 +221,10 @@ export default new Vuex.Store({
     toggleNightOrder: toggle("isNightOrder"),
     toggleStatic: toggle("isStatic"),
     toggleNight: toggle("isNight"),
-    // 夜间唤醒助手的夜次：只接受 >=1 的整数
-    setNight({ grimoire }, val) {
-      const n = parseInt(val, 10);
-      if (Number.isFinite(n) && n >= 1) grimoire.night = n;
-    },
-    // 新开一局：夜次回默认第 1 夜
-    setDefaultNight({ grimoire }) {
-      grimoire.night = 1;
-    },
     toggleGrimoire: toggle("isPublic"),
     toggleImageOptIn: toggle("isImageOptIn"),
-    toggleForceWikiIcon: toggle("forceWikiIcon"),
-    setWikiIcons(state, map) {
-      state.grimoire.wikiIcons = map || null;
-    },
     toggleForwardEvilInfo:toggle("isForwardEvilInfo"),
     toggleModal({ modals }, name) {
-      if (this.getters["quickWake/pendingCount"] > 0) {
-        // Only allow opening the required dialog; never allow toggling it off
-        // or replacing it via the global close/shortcut paths.
-        if (name !== "playerWake" || modals.playerWake) return;
-      }
       if (modals.input) this.state.session.isTyping = false;
       if (name) {
         modals[name] = !modals[name];
@@ -401,75 +363,6 @@ export default new Vuex.Store({
     }
   },
   actions: {
-    /**
-     * 新开一局：把「只属于当前这一局」的临时状态全部复位。
-     * 适用场景：换剧本、随机分配角色、抽取角色（线下发牌）。
-     *
-     * 复位内容：
-     *  - 每个玩家的角色、生死状态(isDead)、提示标记(reminders，认知覆盖角色自动挂回真实身份标记)、
-     *    夜间唤醒助手的完成标记(nightDone)、本座位投票(votes)
-     *  - 本局临时存储：投票(nomination/votes/lockedVote/isVoteInProgress)、
-     *    投票历史(voteHistory/voteSelected)、抽牌队列(drawRoles)、复盘状态(isReview)
-     *  - 夜次(grimoire.night)回到第 1 夜
-     *
-     * @param {Object} payload
-     * @param {Map}    payload.roleMap 当前剧本的角色 Map（store.state.roles），用于还原认知覆盖标记。
-     *                                 不传则用当前 store.state.roles。
-     * @param {Function} [payload.pickRole] 可选：(player) => 新角色对象。用于「随机分配/抽取」时
-     *                                 直接给每个座位写入新角色（传 null 表示保留现有角色，只清状态）。
-     */
-    newGame({ state, commit }, { roleMap, pickRole = null } = {}) {
-      const roles = roleMap || state.roles;
-      const session = state.session;
-
-      // 1) 逐座位复位角色 / 生死 / 提示标记 / 夜间完成标记 / 投票
-      state.players.players.forEach((player, index) => {
-        if (player.role && player.role.team === "traveler") {
-          // 旅行者不参与发牌，跳过角色改动，但也清掉上一局的死亡/标记/完成态
-          commit("players/update", { player, property: "isDead", value: false });
-          commit("players/update", { player, property: "reminders", value: [] });
-          commit("players/update", { player, property: "nightDone", value: {} });
-          return;
-        }
-        let role = player.role;
-        if (typeof pickRole === "function") {
-          role = pickRole(player, index);
-          commit("players/update", { player, property: "role", value: role });
-        }
-        commit("players/update", { player, property: "isDead", value: false });
-        commit("players/update", {
-          player,
-          property: "reminders",
-          value: identityReminders(role, roles)
-        });
-        commit("players/update", { player, property: "nightDone", value: {} });
-        commit("players/update", { player, property: "votes", value: 1 });
-      });
-
-      // 2) 本局临时存储复位
-      commit("session/nomination", {}); // 清空提名/票型/锁票/进行中
-      commit("session/clearVoteHistory");
-      commit("session/setDrawRoles", []);
-      commit("session/stopTimer");
-      if (session.isReview) commit("session/setIsReview", false);
-
-      // 3) 夜次回到第一夜（夜间唤醒助手）
-      commit("setDefaultNight");
-    },
-    // 懒加载 BWIKI 角色图标索引（仅在启用「角色图标强制加载」时按需拉取一次）
-    async ensureWikiIcons({ state, commit }) {
-      if (state.grimoire.wikiIcons) return state.grimoire.wikiIcons;
-      try {
-        const apiBase = window.__TS_API__ || window.location.origin;
-        const res = await fetch(apiBase + "/api/wiki-icons");
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const data = await res.json();
-        if (data && data.map) commit("setWikiIcons", data.map);
-        return state.grimoire.wikiIcons;
-      } catch (e) {
-        return null;
-      }
-    },
     async fetchInit() {
       try {
         // 自建后端：默认同源 /dynamic/init；可用 window.__TS_API__ 覆盖主机
@@ -496,5 +389,5 @@ export default new Vuex.Store({
       }
     }
   },
-  plugins: [persistence, quickWakePersistence, socket]
+  plugins: [persistence, socket]
 });

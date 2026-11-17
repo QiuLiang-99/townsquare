@@ -162,6 +162,7 @@ import {
   computeTargets,
   compositionText
 } from "./../../logic/setup";
+import { identityReminders } from "./../../logic/reminders";
 import { mapGetters, mapMutations, mapState } from "vuex";
 
 const randomElement = arr => arr[Math.floor(Math.random() * arr.length)];
@@ -1151,11 +1152,27 @@ export default {
         this.$store.commit("session/setIsReview", false);
       }
       const roles = this.buildShuffledRoles();
-      // 换了一批角色就是新的一局：统一走 newGame 复位（角色/生死/提示标记/夜序完成标记/投票/临时状态）
-      this.$store.dispatch("newGame", {
-        pickRole: player => {
-          if (player.role.team === "traveler" || !roles.length) return player.role;
-          return roles.pop();
+      this.players.forEach(player => {
+        if (player.role.team !== "traveler" && roles.length) {
+          const value = roles.pop();
+          this.$store.commit("players/update", {
+            player,
+            property: "role",
+            value
+          });
+          // 换了一批角色就是新的一局：上一局的死亡状态与提示标记不能留在新角色身上
+          this.$store.commit("players/update", {
+            player,
+            property: "isDead",
+            value: false
+          });
+          // 提示标记清空，但认知覆盖（如酒鬼）要自动带上真实身份的全局标记，
+          // 例如牌面是占卜师、实际是酒鬼 → 直接挂好「是酒鬼」
+          this.$store.commit("players/update", {
+            player,
+            property: "reminders",
+            value: identityReminders(value, this.$store.state.roles)
+          });
         }
       });
       this.$root.$emit(

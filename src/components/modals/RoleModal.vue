@@ -96,7 +96,6 @@
 import { mapMutations, mapState } from "vuex";
 import Modal from "./Modal";
 import Token from "../Token";
-import { sweepAndCommit, describeRemoved } from "../../logic/reminders";
 
 export default {
   components: { Token, Modal },
@@ -158,30 +157,11 @@ export default {
         if (this.session.isSpectator && role.team === "traveler") return;
         // assign to player
         const player = this.$store.state.players.players[this.playerIndex];
-        // 换角色 / 清空角色时，旧角色自己带来的非全局标记就失效了，
-        // 而且可能挂在别人座位上，所以要扫全场摘掉
-        const oldRole = player.role || {};
-        let groups = [];
-        if (
-          String(oldRole.id || "") &&
-          String(oldRole.id) !== String(role.id || "")
-        ) {
-          groups = sweepAndCommit(this.$store, this.players, oldRole);
-        }
         this.$store.commit("players/update", {
           player,
           property: "role",
           value: role
         });
-        if (groups.length) {
-          this.$root.$emit("undo-reminders", {
-            text: `${player.name} 换了角色，自动移除「${oldRole.name}」带来的标记：${describeRemoved(
-              groups,
-              this.playerIndex
-            )}`,
-            groups
-          });
-        }
       }
       this.tab = "editionRoles";
       this.$store.commit("toggleModal", "role");

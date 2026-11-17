@@ -6,58 +6,6 @@
 
 [点击链接进入！](https://botcgrimoire.top/)
 
-## 开发与自建运行
-
-本仓库同时包含 Vue 2 / Vuex 3 前端和 Express / ws 后端，共用根目录依赖。推荐 **Node.js 22**，与 Docker、CI 使用的版本一致；依赖版本以 `package-lock.json` 为准。
-
-在仓库根目录执行（PowerShell 和常见 Unix shell 均可）：
-
-```sh
-npm ci --no-audit --no-fund
-npm run build
-node server/index.js
-```
-
-启动后访问 `http://localhost:3000/`。同一端口提供页面、HTTP 接口、游戏 WS 和大厅 WS。服务启动时若没有 `dist/`，只提供后端；首次构建后再启动服务。`npm run build` 会自动执行 `postbuild`，生成 sitemap；站点地址可通过构建环境变量 `SITE_URL` 设置。
-
-后端默认 `PORT=3000`、`RATE_LIMIT=30`、`ROOM_GRACE_MS=60000`，头像默认写入 `server/avatars/`。详细配置见[后端说明](server/README.md)，Docker 和反向代理见[部署指南](deploy/README.md)。
-
-`npm run serve` 只启动 HTTPS 前端开发服务器。当前没有开发代理，不能仅运行此命令就连接到另一个端口上的后端；热更新联调的同源代理及运行时配置限制见[贡献指南](CONTRIBUTING.md)。
-
-### 维护文档
-
-| 文档 | 内容 |
-|---|---|
-| [CONTEXT.md](CONTEXT.md) | 领域术语：说书人、玩家、座位、凭证、快速唤醒等 |
-| [架构与状态归属](docs/architecture.md) | 模块、状态权威、存储位置、初始化和恢复时序 |
-| [协议清单](docs/protocol.md) | HTTP/WS 命令、字段、方向、实际校验、回执与错误 |
-| [测试指南](docs/testing.md) | 检查命令、服务启动、端口、覆盖范围和手工验收 |
-| [贡献指南](CONTRIBUTING.md) | 修改约定、验证和文档同步要求 |
-| [AGENTS.md](AGENTS.md) | 编码代理工作约定及前后端目录规则入口 |
-| [TODO.md](TODO.md) | 有代码依据的待办与分阶段重构建议 |
-
-### 常用检查
-
-```sh
-npm run check:server
-npm run lint-ci
-npm run test:quick-wake
-npm run test:room-lifecycle
-npm run build
-```
-
-基础集成测试 `node server/test-ws.js` 需要另行启动独立的 3000 端口服务；两个协议测试入口自行启动隔离服务。前提和清理方式见[测试指南](docs/testing.md)。`npm run lint` 可能自动修改代码，核对时优先使用 `lint-ci`。
-
-主要游戏状态由说书人前端维护；后端还保存房间、身份绑定、公开快照和快速唤醒记录，均为进程内存状态。服务重启会清空这些状态；浏览器本地恢复和头像磁盘存储各有独立作用，不能当作服务端游戏存档。普通协议转发仍有权限与校验缺口，见协议清单及 TODO。
-
-### 目录导航
-
-- `src/components/`：广场、玩家、投票、菜单与各类弹窗。
-- `src/store/`：Vuex、WS 同步与本地持久化；`src/logic/`：规则和文本等逻辑。
-- `src/*.json`、`src/scripts/`、`src/assets/`：角色、剧本和图像等资源。
-- `server/`：HTTP/WS 服务与行为测试；`scripts/`：构建辅助脚本。
-- `deploy/`、`Dockerfile`、`docker-compose.yml`：部署配置；`.github/workflows/`：CI。
-
 ## 特点
 
 - 免费的城镇广场/魔典！

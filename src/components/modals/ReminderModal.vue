@@ -1,6 +1,6 @@
 <template>
   <Modal
-    v-if="modals.reminder && availableReminders.length && (stMode || players[playerIndex])"
+    v-if="modals.reminder && availableReminders.length && players[playerIndex]"
     @close="toggleModal('reminder')"
   >
     <h3>选择一个提醒标记</h3>
@@ -14,7 +14,15 @@
       >
         <span
           class="icon"
-          :style="{ backgroundImage: `url(${reminderIconUrl(reminder, grimoire, roles, iconStatusRev)})` }"
+          :style="{
+            backgroundImage: `url(${
+              reminder.image && grimoire.isImageOptIn
+                ? reminder.image
+                : require('../../assets/icons/' +
+                    (reminder.imageAlt || reminder.role.replace(/old1$/, '')) +
+                    '.png')
+            })`
+          }"
         ></span>
         <span class="text">{{ reminder.name }}</span>
       </li>
@@ -24,8 +32,6 @@
 
 <script>
 import Modal from "./Modal";
-import { reminderIconUrl } from "../../logic/roleIcon";
-import iconMixin from "../../logic/iconMixin";
 import { mapMutations, mapState } from "vuex";
 
 /**
@@ -41,12 +47,8 @@ const mapReminder = ({ id, image, imageAlt }) => name => ({
 });
 
 export default {
-  mixins: [iconMixin],
   components: { Modal },
-  props: {
-    playerIndex: { type: Number, default: null },
-    stMode: { type: Boolean, default: false }
-  },
+  props: ["playerIndex"],
   computed: {
     availableReminders() {
       let reminders = [];
@@ -85,11 +87,10 @@ export default {
       reminders.push({ role: "custom", name: "自定义" });
       return reminders;
     },
-    ...mapState(["modals", "grimoire", "session", "roles"]),
+    ...mapState(["modals", "grimoire", "session"]),
     ...mapState("players", ["players"])
   },
   methods: {
-    reminderIconUrl,
     async showInputModal({ inputType, inputModal, inputData }) {
       return new Promise((resolve, reject) => {
         this.$store.commit("session/setInputResolver", resolve);
@@ -103,29 +104,6 @@ export default {
       });
     },
     async addReminder(reminder) {
-      if (this.stMode) {
-        let token = reminder;
-        if (reminder.role === "custom") {
-          const input = await this.showInputModal({
-            inputType: "reminder",
-            inputModal: "input",
-            inputData: {
-              name: ["输入自定义提醒"],
-              length: 1,
-              placeholder: [""]
-            }
-          }).catch(() => {
-            return null;
-          });
-          if (input === null) return;
-          const name = input[0];
-          if (!name) return;
-          token = { role: "custom", name };
-        }
-        this.$store.commit("players/addStToken", token);
-        this.$store.commit("toggleModal", "reminder");
-        return;
-      }
       const player = this.$store.state.players.players[this.playerIndex];
       let value;
 

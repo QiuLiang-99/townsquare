@@ -1,8 +1,7 @@
 /**
  * TownSquare 自建后端
  * ---------------------------------------------------------------
- * 为 limpy01/townsquare 前端提供可自建的 HTTP/WS 后端，协议以当前代码及 docs/protocol.md 为准。
- * 不承诺与官方私有后端的全部行为等价。
+ * 为 limpy01/townsquare 前端实现官方私有后端 (api.botcgrimoire.top + ws.botcgrimoire.top) 的等价服务。
  *
  * 组成：
  *   1) HTTP API
@@ -11,7 +10,7 @@
  *        - GET  /avatars/<file>     头像静态资源
  *        - GET  /healthz            健康检查
  *   2) WebSocket 两个命名空间 (同端口，按路径前缀区分)
- *        - /ws/<channel>/<playerId>[/host]?auth=<browserSecret>   游戏房间中转
+ *        - /ws/<channel>/<playerId>[/host?auth=<stSecret>]   游戏房间中转
  *        - /lobby/<playerId>                                 大厅房间列表
  *   3) 静态托管：构建后的前端 dist/ (可选，存在才托管)
  *
@@ -21,12 +20,9 @@
  *   - "direct" 帧： { <targetPlayerId|"host">: [command, params] } —— 服务端按 key 拆包投递
  *   - "request" 帧： { <command>: [playerId, params] } —— 目前用于 checkAllowHost / checkAllowJoin / deleteMessage
  *   - "uploadFile" 帧： { <command>: [playerId, params] } —— 头像走这里时把图片存盘并回 "avatarReceived"
- *   - quickWake*：独立定向唤醒协议，禁止经 direct/普通广播注入
- *   - 玩家连接也携带浏览器 secret；稳定 ID 首次加入后绑定该凭证，重连必须匹配
  *   - ping / pong / bye 玩家计数与延迟
  *
- * 状态归属：主要游戏状态由前端 host 编排；本进程保存房间、身份绑定、公开 gs 缓存和
- * 快速唤醒记录，重启即失。普通转发并非完整授权；实际校验见各消息处理分支。
+ * 设计原则：本服务是**无状态中继 + 轻量状态协调**，不做游戏逻辑（游戏状态全部在前端 host）。
  */
 "use strict";
 
@@ -55,18 +51,26 @@ if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
 
 // ------------------------------------------------------------------ 内存状态
 /**
- * rooms 是房间号到房间状态的 Map。房间创建时包含 host/hostIdentity、players、
- * createdAt、everHadHost、meta、quickWake 和 lastGs；玩家首次加入后另建 playerIdentities。
- * meta 保存说书人上报的大厅展示信息，maxPlayers 是展示用座位数，不是加入授权上限。
- * lastGs 仅保存 host 完整普通广播的公开快照；direct/lightweight 及增量更新不刷新它。
- * 复盘、盲抽及快速唤醒座位身份等字段按对应命令更新，不能据此还原完整私密游戏状态。
- * 这些数据仅存于进程内存；浏览器本地恢复与头像磁盘存储是独立机制，见 docs/architecture.md。
+ * rooms[channel] = {
+ *   host: { ws, playerId, auth, connectedAt } | null,
+ *   players: Map<playerId, { ws, ping, connectedAt }>,
+ *   createdAt,
+ *   everHadHost,
+ *   meta: {                      // 大厅展示用的房间元数据（说书人上报）
+ *     name: "房间名",            // 为空则前端用房间号兜底
+ *     stName: "说书人昵称",
+ *     edition: "tb",            // 剧本 id
+ *     maxPlayers: 12,           // 最大人数（建房时填的玩家人数）
+ *     playerCount: 12,          // 座位数（= maxPlayers）
+ *   },
+ * }
+ * 重启即失——与前端"本地 + 说书人为权威"的模型一致；如需持久化可外挂 SQLite。
  */
 const rooms = new Map();
-/** lobbyClients: Set<{ ws, playerId }>，独立连接收到 setRooms 及后续房间变更。 */
+/** lobbyClients: Set<{ ws, playerId, roomsSnapshot }> */
 const lobbyClients = new Set();
 
-// 空房宽限期（毫秒）：仅无 host 且无玩家时开始回收，重连可取消；主动解散立即回收。
+// 房间宽限期（毫秒）：说书人断开后，房间保留这么久等待重连，避免瞬间消失。
 const ROOM_GRACE_MS = parseInt(process.env.ROOM_GRACE_MS || "60000", 10);
 /** roomCleanupTimers: Map<channel, timeoutId> */
 const roomCleanupTimers = new Map();
@@ -103,21 +107,14 @@ function dissolveRoom(channel) {
   const room = rooms.get(channel);
   if (!room) return;
   cancelRoomCleanup(channel);
-  // 通知所有玩家：用 1000(正常关闭) + reason 关闭。
-  // 客户端 onclose 里 code!==1000 会被当作“网络中断”并在 3 秒后自动重连，
-  // 若用 4005 之类非 1000 的码，玩家会重连进一个已不存在的幽灵房间、且看不到提示。
-  // code=1000 才会走客户端的“正常离开”分支：清理状态、回到首页，并弹出 err.reason。
+  const data = frame("alertPopup", "房间已被说书人解散。");
+  if (room.host) trySafeSend(room.host.ws, data);
   room.players.forEach((p) => {
+    trySafeSend(p.ws, data);
     try {
-      p.ws.close(1000, "房间已被说书人解散。");
+      p.ws.close(4005, "room dissolved");
     } catch {}
   });
-  // 说书人自己：同样用 1000 关闭（reason 留空，避免重现“房间已被解散”的弹窗给自己）。
-  if (room.host) {
-    try {
-      room.host.ws.close(1000);
-    } catch {}
-  }
   rooms.delete(channel);
   roomCleanupTimers.delete(channel);
   notifyLobbyRemove(channel);
@@ -150,103 +147,6 @@ function broadcastRoom(room, command, params, except = null) {
   room.players.forEach((p) => {
     if (p.ws !== except) trySafeSend(p.ws, data);
   });
-}
-
-const QUICK_WAKE_COMMANDS = new Set([
-  "quickWakeSend",
-  "quickWakeReply",
-  "quickWakeReceipt",
-  "quickWakeSyncRequest",
-]);
-
-function isQuickWakeCommand(command) {
-  return QUICK_WAKE_COMMANDS.has(command) ||
-    (typeof command === "string" && command.startsWith("quickWake"));
-}
-
-function ensureQuickWakeState(room) {
-  if (!room.quickWake) {
-    room.quickWake = {
-      records: new Map(),
-      order: [],
-    };
-  }
-  return room.quickWake;
-}
-
-function quickWakeStatus(record) {
-  if (record.reply) return "replied";
-  if (record.deliveredAt) return "delivered";
-  return "accepted";
-}
-
-function publicQuickWake(record) {
-  return {
-    id: record.id,
-    roomId: record.roomId,
-    senderPlayerId: record.senderPlayerId,
-    senderName: record.senderName,
-    targetPlayerId: record.targetPlayerId,
-    targetSeat: record.targetSeat,
-    targetName: record.targetName,
-    phase: record.phase,
-    content: record.content,
-    createdAt: record.createdAt,
-    deliveredAt: record.deliveredAt || null,
-    repliedAt: record.repliedAt || null,
-    reply: record.reply || null,
-    status: quickWakeStatus(record),
-  };
-}
-
-function sendQuickWakeError(ws, id, code, message) {
-  send(ws, "quickWakeError", {
-    id: id || "",
-    code,
-    message,
-  });
-}
-
-function storeQuickWakeRecord(room, record) {
-  const state = ensureQuickWakeState(room);
-  state.records.set(record.id, record);
-  if (!state.order.includes(record.id)) state.order.push(record.id);
-  // 已回复记录可以回收，未回复记录不可淘汰，否则刷新后的玩家将无法回复。
-  while (state.order.length > 500) {
-    const index = state.order.findIndex(id => state.records.get(id).reply);
-    if (index < 0) break;
-    const [oldId] = state.order.splice(index, 1);
-    state.records.delete(oldId);
-  }
-}
-
-function sendPendingQuickWakes(ws, room, playerId) {
-  const state = ensureQuickWakeState(room);
-  state.order.forEach(id => {
-    const record = state.records.get(id);
-    if (!record || record.targetPlayerId !== playerId || record.reply) return;
-    record.targetWs = ws;
-    send(ws, "quickWakeIncoming", publicQuickWake(record));
-  });
-}
-
-function sendQuickWakeSnapshot(ws, room) {
-  const state = ensureQuickWakeState(room);
-  const messages = state.order
-    .map(id => state.records.get(id))
-    .filter(record => record && record.senderPlayerId === ws._room.playerId)
-    .sort((a, b) => (Date.parse(a.createdAt) || 0) - (Date.parse(b.createdAt) || 0))
-    .map(publicQuickWake);
-  send(ws, "quickWakeSync", messages);
-}
-
-function notifyQuickWakePresence(room) {
-  const presence = {
-    hostOnline: !!(room.host && room.host.ws.readyState === 1),
-    playerIds: Array.from(room.players.keys()),
-  };
-  if (room.host) send(room.host.ws, "quickWakePresence", presence);
-  room.players.forEach(player => send(player.ws, "quickWakePresence", presence));
 }
 
 function trySafeSend(ws, data) {
@@ -292,8 +192,6 @@ function roomLobbyItem(channel, room) {
     name: m.name || "",
     stName: m.stName || "",
     edition: m.edition || "tb",
-    editionName: m.editionName || "",
-    editionLogo: m.editionLogo || "",
     maxPlayers: m.maxPlayers || room.playerCount || 0,
   };
 }
@@ -331,19 +229,11 @@ app.use(cors());
 app.use(express.json({ limit: "6mb" })); // 头像 base64 可能较大
 
 // 动态配置
-// 版本号统一读 package.json，避免前后端版本号不一致导致「并非最新版本」误报。
-let APP_VERSION = "0.0.0";
-try {
-  APP_VERSION = require(path.join(__dirname, "..", "package.json")).version || APP_VERSION;
-} catch (e) {
-  APP_VERSION = process.env.APP_VERSION || "0.0.0";
-}
-
 app.get("/dynamic/init", (req, res) => {
   res.json({
     status: "success",
     payload: {
-      version: APP_VERSION,
+      version: "3.3.1",
       floatingNotice: process.env.FLOATING_NOTICE || "",
     },
   });
@@ -353,7 +243,7 @@ app.get("/dynamic/init", (req, res) => {
 app.get("/api/init", (req, res) => {
   res.json({
     status: "success",
-    payload: { version: APP_VERSION, floatingNotice: process.env.FLOATING_NOTICE || "" },
+    payload: { version: "3.3.1", floatingNotice: process.env.FLOATING_NOTICE || "" },
   });
 });
 
@@ -384,113 +274,6 @@ app.post("/upload/avatar", (req, res) => {
   } catch (e) {
     log("upload/avatar error", e.stack || e.message);
     return res.status(500).json({ status: "error", message: "server error" });
-  }
-});
-
-// 剧本图代理下载
-// 7uuu.me 的剧本图没有 CORS 头，浏览器里 fetch 拿不到 blob，无法触发「另存为」。
-// 这里做一个受限的反向代理：只允许剧本图所在域名，避免变成任意 URL 代理。
-const IMAGE_PROXY_HOSTS = ["7uuu.me", "www.7uuu.me"];
-const IMAGE_PROXY_MAX_BYTES = 20 * 1024 * 1024;
-
-app.get("/api/fetch-image", async (req, res) => {
-  try {
-    const raw = typeof req.query.url === "string" ? req.query.url : "";
-    let target;
-    try {
-      target = new URL(raw);
-    } catch (e) {
-      return res.status(400).json({ status: "error", message: "invalid url" });
-    }
-    if (target.protocol !== "https:" || !IMAGE_PROXY_HOSTS.includes(target.hostname)) {
-      return res.status(403).json({ status: "error", message: "host not allowed" });
-    }
-    const upstream = await fetch(target.href, {
-      headers: { referer: "https://7uuu.me/script_lib/", "user-agent": "townsquare-image-proxy" },
-      redirect: "follow",
-    });
-    if (!upstream.ok) {
-      return res.status(502).json({ status: "error", message: `upstream ${upstream.status}` });
-    }
-    const type = upstream.headers.get("content-type") || "application/octet-stream";
-    if (!/^image\//i.test(type)) {
-      return res.status(415).json({ status: "error", message: "not an image" });
-    }
-    const buf = Buffer.from(await upstream.arrayBuffer());
-    if (buf.length > IMAGE_PROXY_MAX_BYTES) {
-      return res.status(413).json({ status: "error", message: "image too large" });
-    }
-    res.setHeader("Content-Type", type);
-    res.setHeader("Content-Length", String(buf.length));
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    return res.end(buf);
-  } catch (e) {
-    log("fetch-image error", e.stack || e.message);
-    return res.status(500).json({ status: "error", message: "server error" });
-  }
-});
-
-// BWIKI 角色图标索引
-// 「角色图标强制加载」：前端需要「文件名 → 图床直链」映射，改用钟楼剧本博物馆 WIKI 的角色照片。
-// wiki 的 api.php 有反爬（缺 UA/Referer 会返回 567），浏览器无法自定义这两个头，所以由服务端代拉。
-// 结果在内存里缓存（默认 24 小时），按需刷新。
-const WIKI_API = "https://wiki.biligame.com/jbzlbwgwjcygf/api.php";
-const WIKI_HEADERS = {
-  referer: "https://wiki.biligame.com/jbzlbwgwjcygf/",
-  "user-agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
-};
-const WIKI_CACHE_TTL = 24 * 60 * 60 * 1000;
-let wikiIconCache = null; // { map, at }
-
-async function buildWikiIconMap() {
-  const map = {};
-  let cont = "";
-  for (let i = 0; i < 40; i++) {
-    const u = new URL(WIKI_API);
-    u.searchParams.set("action", "query");
-    u.searchParams.set("list", "allimages");
-    u.searchParams.set("ailimit", "500");
-    u.searchParams.set("aiprop", "url");
-    u.searchParams.set("format", "json");
-    if (cont) u.searchParams.set("aicontinue", cont);
-    const r = await fetch(u.href, { headers: WIKI_HEADERS });
-    if (!r.ok) throw new Error("wiki api " + r.status);
-    const t = await r.json();
-    const list = (t.query && t.query.allimages) || [];
-    for (const f of list) {
-      const m = /^(.*)\.(png|jpg|jpeg|gif|webp)$/i.exec(f.name || "");
-      if (!m) continue;
-      const base = m[1];
-      const ext = m[2].toLowerCase();
-      // 同名文件优先 png（角色图标通常是 png）
-      if (!map[base] || (ext === "png" && !/\.png$/i.test(map[base] || ""))) {
-        map[base] = f.url;
-      }
-    }
-    cont = t.continue && t.continue.aicontinue;
-    if (!cont) break;
-  }
-  return map;
-}
-
-app.get("/api/wiki-icons", async (req, res) => {
-  try {
-    const expired = !wikiIconCache || Date.now() - wikiIconCache.at > WIKI_CACHE_TTL;
-    if (expired || req.query.refresh === "1") {
-      const map = await buildWikiIconMap();
-      wikiIconCache = { map, at: Date.now() };
-      log("wiki icons refreshed", Object.keys(map).length);
-    }
-    res.setHeader("Cache-Control", "public, max-age=3600");
-    return res.json({
-      status: "success",
-      count: Object.keys(wikiIconCache.map).length,
-      map: wikiIconCache.map,
-    });
-  } catch (e) {
-    log("wiki-icons error", e.stack || e.message);
-    return res.status(502).json({ status: "error", message: "wiki fetch failed" });
   }
 });
 
@@ -583,22 +366,10 @@ server.on("upgrade", (req, socket, head) => {
 wss.on("connection", (ws, req) => {
   const { ns, pathname } = ws._ts;
   ws.isAlive = true;
-  ws._rtt = 0;
   ws.rateBucket = { count: 0, resetAt: Date.now() + 1000 };
-  // 连上立刻做一次协议层 ping，尽快拿到第一份 RTT（不用等 30 秒心跳）
-  try {
-    ws._pingSentAt = Date.now();
-    ws.ping();
-  } catch {}
 
   ws.on("pong", () => {
     ws.isAlive = true;
-    // 计算 WebSocket 协议层 RTT（服务端与这条连接之间的往返时延），供 app 层延迟显示用
-    if (ws._pingSentAt) {
-      const rtt = Date.now() - ws._pingSentAt;
-      if (rtt >= 0 && rtt < 30000) ws._rtt = rtt;
-      ws._pingSentAt = 0;
-    }
   });
 
   if (ns === "lobby") {
@@ -645,7 +416,6 @@ const heartbeat = setInterval(() => {
     }
     ws.isAlive = false;
     try {
-      ws._pingSentAt = Date.now();
       ws.ping();
     } catch {}
   });
@@ -677,24 +447,14 @@ function handleRoomConnection(ws, pathname, req) {
   ws._room = { channel, playerId, isHost, auth };
 
   if (isHost) {
-    if (!auth) {
-      send(ws, "alertPopup", "说书人连接缺少身份密钥。");
-      try {
-        ws.close(4009, "missing host auth");
-      } catch {}
-      return;
-    }
     // 说书人建房：只有 host 才真正创建房间对象（玩家连入不存在的房不会建幽灵房）
     if (!room) {
       room = {
         host: null,
-        hostIdentity: null,
         players: new Map(),
         createdAt: Date.now(),
         everHadHost: false,
         meta: {},
-        quickWake: { records: new Map(), order: [] },
-        lastGs: null, // 缓存说书人最近一次广播的 gs（含座位表），供新加入者补发
       };
       rooms.set(channel, room);
     }
@@ -707,29 +467,13 @@ function handleRoomConnection(ws, pathname, req) {
       } catch {}
       return;
     }
-    if (
-      !room.host &&
-      room.hostIdentity &&
-      (room.hostIdentity.playerId !== playerId ||
-        room.hostIdentity.auth !== auth)
-    ) {
-      send(ws, "alertPopup", "该房间已有说书人，无法接管。");
-      try {
-        ws.close(4009, "host identity mismatch");
-      } catch {}
-      return;
-    }
-    room.hostAuth = auth;
     room.host = { ws, playerId, auth, connectedAt: Date.now() };
-    room.hostIdentity = { playerId, auth };
     room.everHadHost = true;
     room.hostLeftAt = null;
     if (!room.meta) room.meta = {};
     log("host connect channel", channel, "playerId", playerId);
     // 客户端会主动 _request checkAllowHost；此处直接回允许（重复 host 已在上面拦截）
     send(ws, "allowHost", true);
-    sendQuickWakeSnapshot(ws, room);
-    notifyQuickWakePresence(room);
     // host 不会重复加入 players；若此 playerId 之前以玩家身份在房间，移除
     if (room.players.has(playerId)) {
       const old = room.players.get(playerId);
@@ -755,16 +499,6 @@ function handleRoomConnection(ws, pathname, req) {
       }, 100);
       return;
     }
-    // A public stable player ID is not a credential. Bind it to the browser's
-    // random session secret on first join, and require that secret on reconnect.
-    if (!room.playerIdentities) room.playerIdentities = new Map();
-    const expectedAuth = room.playerIdentities.get(playerId);
-    if (!auth || (expectedAuth && expectedAuth !== auth)) {
-      send(ws, "allowJoin", false);
-      ws.close(4003, "invalid player credentials");
-      return;
-    }
-    room.playerIdentities.set(playerId, auth);
     cancelRoomCleanup(channel);
     // 同 playerId 重复连接则踢掉旧连接
     if (room.players.has(playerId)) {
@@ -779,12 +513,6 @@ function handleRoomConnection(ws, pathname, req) {
     log("player connect channel", channel, "playerId", playerId, "players:", room.players.size);
     // 客户端会 _request checkAllowJoin；此处按房间是否存在(曾有过host)回答
     send(ws, "allowJoin", true);
-    // 关键修复：若说书人此前已广播过 gs（含座位表），立即补发给刚加入的玩家，
-    // 避免依赖"客户端主动向 host 请求 getGamestate 且 host 恰好在线并回应"这一时序，
-    // 否则新加入者可能看不到任何座位。缓存的 gs 是普通负荷（非 lightweight），座位信息完整。
-    if (room.lastGs) {
-      send(ws, "gs", room.lastGs);
-    }
     notifyLobbyUpdate(channel);
   }
 }
@@ -799,38 +527,6 @@ function routeRoomMessage(ws, command, params, feedback) {
   if (!room) return;
 
   switch (command) {
-    case "quickWakeSeats": {
-      if (!meta.isHost || !room.host || room.host.ws !== ws) {
-        sendQuickWakeError(ws, "", "forbidden", "只有当前说书人可以更新座位身份。");
-        return;
-      }
-      if (Array.isArray(params)) room.quickWakeSeated = new Set(params.filter(id => typeof id === "string" && id && id !== "host" && id !== meta.playerId));
-      return;
-    }
-    case "quickWakeSend": {
-      handleQuickWakeSend(ws, room, meta, params);
-      return;
-    }
-
-    case "quickWakeReply": {
-      handleQuickWakeReply(ws, room, meta, params);
-      return;
-    }
-
-    case "quickWakeReceipt": {
-      handleQuickWakeReceipt(ws, room, meta, params);
-      return;
-    }
-
-    case "quickWakeSyncRequest": {
-      if (!meta.isHost || !room.host || room.host.ws !== ws) {
-        sendQuickWakeError(ws, "", "forbidden", "只有当前说书人可以同步快捷唤醒历史。");
-        return;
-      }
-      sendQuickWakeSnapshot(ws, room);
-      return;
-    }
-
     // ---- 中转：原样广播给房间其他人（含 host）----
     case "direct": {
       // params: { <targetId|"host">: [command, params] }
@@ -839,15 +535,6 @@ function routeRoomMessage(ws, command, params, feedback) {
         const sub = params[targetId];
         if (!Array.isArray(sub)) return;
         const [subCmd, subParams] = sub;
-        if (isQuickWakeCommand(subCmd)) {
-          sendQuickWakeError(
-            ws,
-            subParams && (subParams.id || subParams.wakeId),
-            "forbidden",
-            "快捷唤醒必须使用受校验的专用消息通道。"
-          );
-          return;
-        }
         if (targetId === "host") {
           if (room.host && room.host.ws !== ws) {
             send(room.host.ws, subCmd, subParams, feedback);
@@ -859,11 +546,6 @@ function routeRoomMessage(ws, command, params, feedback) {
           }
         }
       });
-      // 回一个 feedback 帧给发送方自己：前端收到后会把自己这条消息也追加到本地
-      // 聊天记录里（私聊时"自己发的消息"才能显示出来），并清掉发送队列。
-      if (feedback !== undefined && feedback !== false) {
-        send(ws, "feedback", feedback);
-      }
       return;
     }
 
@@ -896,11 +578,6 @@ function routeRoomMessage(ws, command, params, feedback) {
       if (typeof params.name === "string") clean.name = params.name.slice(0, 60);
       if (typeof params.stName === "string") clean.stName = params.stName.slice(0, 40);
       if (typeof params.edition === "string") clean.edition = params.edition.slice(0, 32);
-      if (typeof params.editionName === "string") clean.editionName = params.editionName.slice(0, 60);
-      // 剧本封面（剧本 JSON 里的 _meta.logo），供大厅展示。只接受 http(s) 绝对地址。
-      if (typeof params.editionLogo === "string" && /^https?:\/\//i.test(params.editionLogo)) {
-        clean.editionLogo = params.editionLogo.slice(0, 512);
-      }
       if (Number.isFinite(params.maxPlayers)) clean.maxPlayers = Math.max(0, Math.min(20, Math.floor(params.maxPlayers)));
       room.meta = Object.assign({}, room.meta, clean);
       // 房间若已在大厅可见，广播更新；否则（首次）按新增处理
@@ -910,37 +587,20 @@ function routeRoomMessage(ws, command, params, feedback) {
 
     case "ping": {
       // params: [playerIdOrCount, "latency"]
-      // 客户端每 3 秒发一次 ping（第二项是字面量 "latency"），服务端负责把「其他节点」
-      // 各自的往返时延填成真实数字再转发，前端才能显示「与说书人的延迟 / 与玩家的延迟」。
+      // 服务端把玩家 ping 记录下来，并回 pong 让前端算延迟
       const [who, latency] = Array.isArray(params) ? params : [];
       const p = room.players.get(who);
       if (p) p.ping = Date.now();
       // 回 pong（前端 _handlePong 只置 _isAlive=true）
       send(ws, "pong", latency || 0);
-      const isSenderHost = room.host && room.host.ws === ws;
-      if (isSenderHost) {
-        // 说书人发起的 ping：转发给每个玩家，让玩家得到「与说书人的延迟」。
-        // 玩家侧 _handlePing 走 else if(latency) 分支，第一项必须是 0/空。
-        room.players.forEach((pl, pid) => {
-          const rtt = pl.ws && pl.ws._rtt ? pl.ws._rtt : 0;
-          send(pl.ws, "ping", [0, rtt]);
-        });
-      } else if (p) {
-        // 玩家发起的 ping：把该玩家测得的延迟转发给说书人，让说书人统计各玩家延迟。
-        const rtt = ws._rtt ? ws._rtt : 0;
-        if (room.host && room.host.ws) {
-          send(room.host.ws, "ping", [who, rtt]);
-        }
-      }
+      // 如果是 host，顺便把玩家数分别回给 host/玩家由前端自行计数；这里不额外广播
       return;
     }
 
     case "bye": {
       // 玩家主动离开
       const playerId = params;
-      if (playerId !== meta.playerId) return;
       room.players.delete(playerId);
-      notifyQuickWakePresence(room);
       // 通知 host 更新人数
       if (room.host) send(room.host.ws, "bye", playerId);
       notifyLobbyUpdate(meta.channel);
@@ -954,239 +614,13 @@ function routeRoomMessage(ws, command, params, feedback) {
       return;
     }
 
-    case "reviewRevealed": {
-      // 复盘视角：仅说书人可广播「谁被点开揭示」，转发全房间并缓存供重连补发
-      if (!meta.isHost) return;
-      room.reviewRevealed = Array.isArray(params) ? params.slice(0, 20) : [];
-      broadcastRoom(room, "reviewRevealed", room.reviewRevealed, ws);
-      return;
-    }
-
-    case "blindDraw": {
-      // 盲抽角色：仅说书人可开启/关闭盲抽，转发全房间并缓存供重连补发。
-      // 隐私：角色内容（roles）只留在说书人本地，绝不能随广播下发，否则玩家可反推他人身份。
-      // 只广播 active + 槽位数量 count（=roles.length），以及已有的 taken 记录。
-      if (!meta.isHost) return;
-      const active = !!(params && params.active);
-      const count = active ? (Number(params && params.count) || 0) : 0;
-      room.blindDraw = {
-        active,
-        count,
-        taken: active && Array.isArray(params && params.taken) ? params.taken : []
-      };
-      broadcastRoom(room, "blindDraw", { active, count, taken: room.blindDraw.taken }, ws);
-      return;
-    }
-
-    case "blindDrawTaken": {
-      // 盲抽角色：某个槽位被抽走 → 转发「槽位 -> 抽取者」给全房间（不含抽到什么角色），缓存供重连补发
-      if (!meta.isHost) return;
-      room.blindDrawTaken = Array.isArray(params) ? params : [];
-      if (room.blindDraw) room.blindDraw.taken = room.blindDrawTaken;
-      broadcastRoom(room, "blindDrawTaken", room.blindDrawTaken, ws);
-      return;
-    }
-
     default: {
-      if (isQuickWakeCommand(command)) {
-        sendQuickWakeError(ws, params && (params.id || params.wakeId), "forbidden", "快捷唤醒消息不可广播。");
-        return;
-      }
       // 其余所有游戏广播命令（gs/player/nomination/vote/lock/swap/move/remove/
       // chat/addGroupChat/fabled/isNight/votingSpeed/... ）一律原样转发给房间内
       // 除发送者外的所有连接（host 发出的给所有玩家，玩家发出的给 host 及其他玩家）。
-      // 若说书人广播的是完整 gs（含座位表），缓存一份，供后续新加入者补发（见 handleRoomConnection）。
-      if (command === "gs" && meta.isHost && params && Array.isArray(params.gamestate) && !params.isLightweight) {
-        room.lastGs = params;
-      }
       broadcastRoom(room, command, params, ws);
       return;
     }
-  }
-}
-
-function cleanQuickWakeText(value, maxLength) {
-  if (typeof value !== "string") return "";
-  return value.trim().slice(0, maxLength);
-}
-
-function cleanQuickWakePhase(phase) {
-  if (!phase || typeof phase !== "object") {
-    return { kind: "night", night: 1, label: "第1夜" };
-  }
-  const kind = phase.kind === "day" ? "day" : "night";
-  const n = Number.isFinite(Number(phase.night)) && Number(phase.night) >= 1
-    ? Math.floor(Number(phase.night))
-    : 1;
-  return {
-    kind,
-    night: n,
-    label: cleanQuickWakeText(phase.label, 40) || (kind === "night" ? `第${n}夜` : `第${n}个白天`),
-  };
-}
-
-function handleQuickWakeSend(ws, room, meta, params) {
-  if (!meta.isHost || !room.host || room.host.ws !== ws) {
-    sendQuickWakeError(ws, params && params.id, "forbidden", "只有当前说书人可以发送快捷唤醒。");
-    return;
-  }
-  if (!params || typeof params !== "object") {
-    sendQuickWakeError(ws, "", "invalid", "快捷唤醒消息格式无效。");
-    return;
-  }
-  const id = cleanQuickWakeText(params.id, 100);
-  const roomId = String(params.roomId || "");
-  const targetPlayerId = cleanQuickWakeText(params.targetPlayerId, 100);
-  const content = cleanQuickWakeText(params.content, 4000);
-  if (!id || !targetPlayerId || !content || roomId !== String(meta.channel)) {
-    sendQuickWakeError(ws, id, "invalid", "消息为空或收件人/房间信息不完整。");
-    return;
-  }
-
-  const state = ensureQuickWakeState(room);
-  const existing = state.records.get(id);
-  if (existing) {
-    if (
-      existing.senderPlayerId !== meta.playerId ||
-      existing.targetPlayerId !== targetPlayerId ||
-      existing.content !== content ||
-      existing.roomId !== roomId
-    ) {
-      sendQuickWakeError(ws, id, "conflict", "消息 ID 已被另一条消息使用。");
-      return;
-    }
-    const target = room.players.get(targetPlayerId);
-    if (target && room.quickWakeSeated && room.quickWakeSeated.has(targetPlayerId) && target.ws !== existing.targetWs && !existing.reply) {
-      existing.targetWs = target.ws;
-      send(target.ws, "quickWakeIncoming", publicQuickWake(existing));
-    }
-    send(ws, "quickWakeAccepted", { id });
-    if (quickWakeStatus(existing) !== "accepted") {
-      send(ws, "quickWakeStatus", publicQuickWake(existing));
-    }
-    return;
-  }
-
-  if (!room.quickWakeSeated || !room.quickWakeSeated.has(targetPlayerId)) {
-    sendQuickWakeError(ws, id, "unseated", "目标玩家已离座或座位为空，消息未发送。");
-    return;
-  }
-  const target = room.players.get(targetPlayerId);
-  if (!target || !target.ws || target.ws.readyState !== 1) {
-    sendQuickWakeError(ws, id, "offline", "目标玩家当前未连接，消息未发送。");
-    return;
-  }
-
-  if (state.order.length >= 1000) {
-    sendQuickWakeError(ws, id, "capacity", "待回复消息过多，请先处理现有消息。");
-    return;
-  }
-  const record = {
-    id,
-    roomId,
-    senderPlayerId: meta.playerId,
-    senderName: cleanQuickWakeText(params.senderName, 80) || "说书人",
-    targetPlayerId,
-    targetSeat: Number.isFinite(Number(params.targetSeat))
-      ? Math.max(1, Math.floor(Number(params.targetSeat)))
-      : 0,
-    targetName: cleanQuickWakeText(params.targetName, 80),
-    phase: cleanQuickWakePhase(params.phase),
-    content,
-    createdAt: cleanQuickWakeText(params.createdAt, 80) || new Date().toISOString(),
-    deliveredAt: null,
-    repliedAt: null,
-    reply: null,
-    targetWs: target.ws,
-  };
-
-  storeQuickWakeRecord(room, record);
-  send(target.ws, "quickWakeIncoming", publicQuickWake(record));
-  // 这是服务端已接收的确认，不代表玩家客户端已经收到；送达状态由
-  // quickWakeReceipt 回执确认。
-  send(ws, "quickWakeAccepted", { id });
-}
-
-function handleQuickWakeReceipt(ws, room, meta, params) {
-  if (meta.isHost || !room.players.get(meta.playerId) || room.players.get(meta.playerId).ws !== ws) {
-    sendQuickWakeError(ws, params && params.wakeId, "forbidden", "说书人不能伪造玩家送达回执。");
-    return;
-  }
-  const wakeId = cleanQuickWakeText(params && params.wakeId, 100);
-  if (!wakeId) return;
-  const state = ensureQuickWakeState(room);
-  const record = state.records.get(wakeId);
-  if (!record || record.targetPlayerId !== meta.playerId) {
-    sendQuickWakeError(ws, wakeId, "forbidden", "不能确认不属于你的快捷唤醒。");
-    return;
-  }
-  if (String(params.roomId || "") !== String(meta.channel)) {
-    sendQuickWakeError(ws, wakeId, "invalid", "房间信息不匹配。");
-    return;
-  }
-  if (!record.deliveredAt) record.deliveredAt = new Date().toISOString();
-  record.targetWs = ws;
-  if (room.host && room.host.ws) {
-    send(room.host.ws, "quickWakeStatus", publicQuickWake(record));
-  }
-}
-
-function handleQuickWakeReply(ws, room, meta, params) {
-  if (meta.isHost || !room.players.get(meta.playerId) || room.players.get(meta.playerId).ws !== ws) {
-    sendQuickWakeError(ws, params && params.id, "forbidden", "说书人不能代替玩家回复。");
-    return;
-  }
-  if (!params || typeof params !== "object") {
-    sendQuickWakeError(ws, "", "invalid", "回复格式无效。");
-    return;
-  }
-  const replyId = cleanQuickWakeText(params.id, 100);
-  const wakeId = cleanQuickWakeText(params.wakeId, 100);
-  const content = cleanQuickWakeText(params.content, 1000);
-  if (!replyId || !wakeId || !content) {
-    sendQuickWakeError(ws, replyId || wakeId, "invalid", "回复不能为空。");
-    return;
-  }
-  if (String(params.roomId || "") !== String(meta.channel)) {
-    sendQuickWakeError(ws, replyId, "invalid", "房间信息不匹配。");
-    return;
-  }
-
-  const state = ensureQuickWakeState(room);
-  const record = state.records.get(wakeId);
-  if (!record || record.targetPlayerId !== meta.playerId) {
-    sendQuickWakeError(ws, replyId, "forbidden", "不能回复不属于你的快捷唤醒。");
-    return;
-  }
-
-  if (record.reply) {
-    if (record.reply.id !== replyId) {
-      sendQuickWakeError(ws, replyId, "alreadyReplied", "这条快捷唤醒已经回复过了。");
-      return;
-    }
-    send(ws, "quickWakeReplyAck", record.reply);
-    if (room.host && room.host.ws) {
-      send(room.host.ws, "quickWakeStatus", publicQuickWake(record));
-    }
-    return;
-  }
-
-  record.reply = {
-    id: replyId,
-    wakeId,
-    roomId: String(meta.channel),
-    playerId: meta.playerId,
-    senderName: cleanQuickWakeText(params.senderName, 80) || record.targetName,
-    phase: cleanQuickWakePhase(params.phase || record.phase),
-    content,
-    createdAt: cleanQuickWakeText(params.createdAt, 80) || new Date().toISOString(),
-  };
-  record.repliedAt = record.reply.createdAt;
-  record.targetWs = ws;
-
-  send(ws, "quickWakeReplyAck", record.reply);
-  if (room.host && room.host.ws) {
-    send(room.host.ws, "quickWakeStatus", publicQuickWake(record));
   }
 }
 
@@ -1194,22 +628,12 @@ function handleQuickWakeReply(ws, room, meta, params) {
 function handleRequest(ws, room, meta, subCommand, playerId, subParams, feedback) {
   switch (subCommand) {
     case "checkAllowHost":
-      if (!meta.isHost) {
-        send(ws, "allowHost", false);
-        break;
-      }
       // 说书人请求开房：若已有其它 host 则拒绝
-      if (
-        (room.host && room.host.ws !== ws) ||
-        (room.hostIdentity &&
-          (room.hostIdentity.playerId !== meta.playerId ||
-            room.hostIdentity.auth !== meta.auth))
-      ) {
+      if (room.host && room.host.ws !== ws) {
         send(ws, "allowHost", false);
       } else {
         if (!room.host) {
           room.host = { ws, playerId, auth: meta.auth, connectedAt: Date.now() };
-          room.hostIdentity = { playerId, auth: meta.auth };
           room.everHadHost = true;
           cancelRoomCleanup(meta.channel);
         }
@@ -1221,21 +645,13 @@ function handleRequest(ws, room, meta, subCommand, playerId, subParams, feedback
       // 单纯由玩家自己刚连上而新建的空房间不算，避免误判为存在。
       send(ws, "allowJoin", !!(room.everHadHost || room.host));
       break;
-    case "deleteMessage": {
-      // 前端在收到一条 chat 后，会发 request deleteMessage：[playerId, ["direct", 原始消息id]]。
-      // 设计约定：服务端要把这个「原始消息id」作为 feedback 回给房间（真正要的是回给发信人），
-      // 发信人收到 feedback 后 _deleteFromQueue(原始id) 才会把「自己发的这条」也落到本地聊天记录里。
-      // 否则发送方永远看不到自己发出的消息。
-      const origId = Array.isArray(subParams) ? subParams[1] : undefined;
-      if (origId !== undefined && origId !== null) {
-        broadcastRoom(room, "feedback", origId, null);
-      }
-      // 同时按需给请求方回执（保持通用 request 语义）
+    case "deleteMessage":
+      // 消息已投递确认，无需服务端额外动作（前端据此删除本地队列）
+      // 回一个 feedback 帧确认
       if (feedback !== undefined && feedback !== false) {
         send(ws, "feedback", feedback);
       }
       break;
-    }
     default:
       // 未知 request：忽略
       break;
@@ -1282,7 +698,6 @@ function onWsClose(ws) {
           notifyLobbyUpdate(meta.channel);
         }
       }
-      notifyQuickWakePresence(room);
       // 空房间回收：说书人离开时给一个宽限期（等待其重连），宽限期内保留房间，
       // 避免玩家加入时误报"房间不存在"。玩家全走且host也走时同样走宽限。
       if (!room.host && room.players.size === 0) {

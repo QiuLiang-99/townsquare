@@ -321,13 +321,43 @@
     "ability": "场上有两位说书人：一人说真话，一人说假话。每局游戏限一次，他们可能会在黄昏互换。"
   },
   {
-    "id": "25_jinghua",
-    "firstNightReminder": "",
-    "otherNightReminder": "",
-    "reminders": [],
-    "setup": false,
-    "name": "斯派德米",
+    "id": "ankothearts",
+    "name": "红心赦令",
     "team": "fabled",
-    "ability": "当有玩家“疯狂”证明错误的角色运作或游戏规则时，说书人可能会公开解释正确的。"
+    "ability": "所有其他玩家中毒，直到下个黄昏。",
+    "firstNight": 0,
+    "otherNight": 0,
+    "reminders": [],
+    "edition": "custom_ankot"
+  },
+  {
+    "id": "ankotspades",
+    "name": "黑桃赦令",
+    "team": "fabled",
+    "ability": "死亡的爪牙与你今晚击杀的爪牙重获能力直到下个黄昏。",
+    "firstNight": 0,
+    "otherNight": 0,
+    "reminders": [],
+    "edition": "custom_ankot"
+  },
+  {
+    "id": "ankotdiamonds",
+    "name": "方块赦令",
+    "team": "fabled",
+    "ability": "你要选择一名玩家：他死亡。如果你因此杀死了一名爪牙，刷新其他所有令。",
+    "firstNight": 0,
+    "otherNight": 0,
+    "reminders": [],
+    "edition": "custom_ankot"
+  },
+  {
+    "id": "ankotclubs",
+    "name": "梅花赦令",
+    "team": "fabled",
+    "ability": "你要选择一名玩家：他死亡。即使任何原因让他不会死亡。",
+    "firstNight": 0,
+    "otherNight": 0,
+    "reminders": [],
+    "edition": "custom_ankot"
   }
 ]

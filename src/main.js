@@ -9,11 +9,9 @@ import { wraith } from './assets/svg/wraith';
 
 const faIcons = [
   "AddressCard",
-  "ArrowCircleUp",  "ArrowCircleDown",
+  "ArrowCircleUp",
+  "ArrowCircleDown",
   "ArrowLeft",
-  "Ban",
-  "Bell",
-  "PaperPlane",
   "Book",
   "BookOpen",
   "BookDead",
@@ -27,7 +25,6 @@ const faIcons = [
   "Copy",
   "Clipboard",
   "Dice",
-  "Download",
   "Dragon",
   "Eraser",
   "ExchangeAlt",
@@ -57,9 +54,6 @@ const faIcons = [
   "RedoAlt",
   "SearchMinus",
   "SearchPlus",
-  "Search",
-  "Spinner",
-  "Star",
   "SlidersH",
   "Skull",
   "Slash",
@@ -89,19 +83,6 @@ library.add(
 );
 Vue.component("font-awesome-icon", FontAwesomeIcon);
 Vue.config.productionTip = false;
-
-// 把构建时注入的最后更新时间写入 store，供「关于 → 更新日志」下方的 build 按钮展示。
-// build 版本号取该时间的紧凑格式（YYYYMMDD.HHmm），若未注入则回退空串。
-if (typeof __BUILD_TIME__ !== "undefined" && __BUILD_TIME__) {
-  const d = new Date(__BUILD_TIME__);
-  if (!isNaN(d.getTime())) {
-    const pad = n => String(n).padStart(2, "0");
-    const buildVersion =
-      `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}.` +
-      `${pad(d.getHours())}${pad(d.getMinutes())}`;
-    store.commit("setBuildVersion", buildVersion);
-  }
-}
 
 new Vue({
   render: h => h(App),

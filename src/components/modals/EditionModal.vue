@@ -18,15 +18,6 @@
           {{ edition.name }}
         </li>
         <li
-          class="edition edition-scriptlib"
-          @click="openScriptLibrary"
-          :style="{
-            backgroundImage: `url(${require('../../assets/editions/scriptlib.png')})`
-          }"
-        >
-          剧本库
-        </li>
-        <li
           class="edition edition-custom"
           @click="isCustom = true"
           :style="{
@@ -149,11 +140,6 @@ export default {
     closeEdition(){
       this.toggleModal('edition');
       this.isCustom = false;
-    },
-    openScriptLibrary() {
-      this.isCustom = false;
-      this.toggleModal('edition');
-      this.$nextTick(() => this.toggleModal('scriptLibrary'));
     },
     openUpload() {
       this.$refs.upload.click();
@@ -279,8 +265,6 @@ export default {
         this.$store.commit("players/setFabled", { fabled });
       }
       this.isCustom = false;
-      // 换剧本 = 新开一局：清掉上一局的角色/生死/标记/夜序完成态/投票等临时数据
-      this.$store.dispatch("newGame");
     },
     parseStates(roles) {
       if (!roles || !roles.length) return;
@@ -327,8 +311,6 @@ export default {
     setHomeEdition(edition) {
       if (["tb", "bmr", "snv", "luf", "all", "custom_ankot"].includes(edition.id)) this.$store.commit("setStates", []);
       this.setEdition(edition, this.selectedEditions);
-      // 换剧本 = 新开一局：清掉上一局的角色/生死/标记/夜序完成态/投票等临时数据
-      this.$store.dispatch("newGame");
     },
     ...mapMutations(["toggleModal", "setEdition"])
   }

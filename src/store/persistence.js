@@ -1,18 +1,5 @@
-/**
- * 旧有本地状态恢复与 mutation 持久化，先于快速唤醒持久化和 socket 插件安装。
- * 先恢复剧本/座位，再恢复 playerId、浏览器凭证和会话，供后续连接使用。
- * 历史键并非全部按房间隔离，部分读取仍直接解析 JSON；限制及迁移待办见 TODO.md。
- * safeStorage 失败时只维持本次内存会话，不保证刷新或服务器重启后的恢复。
- */
-const { createSessionStorage } = require("./safeStorage");
-
 module.exports = store => {
   if (window.location.pathname != "/") return;
-  const localStorage = createSessionStorage(() => window.localStorage, () => {
-    if (!store.state.quickWake.storageError) {
-      store.commit("quickWake/setStorageError", "浏览器存储不可用，本次会话仍可继续使用快捷唤醒。");
-    }
-  });
 
   // 安全读取：遇到非法 JSON(如历史遗留的字符串 "undefined"/"null" 或损坏数据)
   // 不抛异常，自动清除该键并返回 fallback，避免初始化崩溃导致整页白屏。
@@ -62,19 +49,11 @@ module.exports = store => {
   if (localStorage.getItem("imageOptIn")) {
     store.commit("toggleImageOptIn", true);
   }
-  if (localStorage.getItem("forceWikiIcon")) {
-    store.commit("toggleForceWikiIcon", true);
-    // 恢复后按需拉取图床索引，保证刷新后角色图标仍是 wiki 图
-    store.dispatch("ensureWikiIcons");
-  }
   if (localStorage.getItem("zoom")) {
     store.commit("setZoom", parseFloat(localStorage.getItem("zoom")));
   }
   if (localStorage.getItem("audioThreshold")) {
     store.commit("setAudioThreshold", localStorage.getItem("audioThreshold"));
-  }
-  if (localStorage.getItem("night")) {
-    store.commit("setNight", parseInt(localStorage.getItem("night"), 10));
   }
   if (localStorage.getItem("isGrimoire")) {
     store.commit("toggleGrimoire", false);
@@ -148,12 +127,6 @@ module.exports = store => {
         fabled: v,
         emptyFabled: true
       });
-    }
-  }
-  {
-    const v = safeParse("stTokens");
-    if (Array.isArray(v)) {
-      store.commit("players/setStTokens", v);
     }
   }
   {
@@ -309,13 +282,6 @@ module.exports = store => {
           localStorage.removeItem("imageOptIn");
         }
         break;
-      case "toggleForceWikiIcon":
-        if (state.grimoire.forceWikiIcon) {
-          localStorage.setItem("forceWikiIcon", 1);
-        } else {
-          localStorage.removeItem("forceWikiIcon");
-        }
-        break;
       case "setZoom":
         if (payload !== 0) {
           localStorage.setItem("zoom", payload);
@@ -325,10 +291,6 @@ module.exports = store => {
         break;
       case "setAudioThreshold":
         localStorage.setItem("audioThreshold", payload);
-        break;
-      case "setNight":
-      case "setDefaultNight":
-        localStorage.setItem("night", String(state.grimoire.night));
         break;
       case "setSelectedEditions":
         localStorage.setItem("selectedEditions", JSON.stringify(payload));
@@ -370,11 +332,6 @@ module.exports = store => {
           "fabled",
           JSON.stringify(state.players.fabled)
         );
-        break;
-      case "players/addStToken":
-      case "players/removeStToken":
-      case "players/setStTokens":
-        safeSetJSON("stTokens", state.players.stTokens);
         break;
       case "players/add":
       case "players/update":

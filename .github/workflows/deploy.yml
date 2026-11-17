@@ -44,12 +44,6 @@ jobs:
       - name: Check server syntax
         run: npm run check:server
 
-      - name: Test quick-wake logic, state, and protocol
-        run: npm run test:quick-wake
-
-      - name: Test isolated room lifecycle
-        run: npm run test:room-lifecycle
-
       - name: Build frontend
         env:
           SITE_URL: ${{ vars.SITE_URL || 'https://example.com' }}

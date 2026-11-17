@@ -19,15 +19,11 @@
           :title="`点击加入房间 ${room.channel}`"
         >
           <div class="wl-cover">
-            <img
-              :src="coverSrc(room)"
-              :alt="editionName(room.edition, room.editionName)"
-              @error="onCoverError(room)"
-            />
+            <img :src="editionImage(room.edition)" :alt="editionName(room.edition)" />
           </div>
           <div class="wl-info">
             <div class="wl-name">{{ room.name || room.channel }}</div>
-            <div class="wl-edition">{{ editionName(room.edition, room.editionName) }}</div>
+            <div class="wl-edition">{{ editionName(room.edition) }}</div>
             <div class="wl-meta">
               <span class="wl-cell"><font-awesome-icon icon="users" /> {{ room.players }}/{{ room.maxPlayers || room.players }}</span>
               <span class="wl-cell"><font-awesome-icon icon="hashtag" /> {{ room.channel }}</span>
@@ -50,12 +46,6 @@ const EDITIONS = new Map(editionsJSON.map((e) => [e.id, e]));
 
 export default {
   name: "WorldLobby",
-  data() {
-    return {
-      // 外链封面加载失败的房间，退回内置剧本封面
-      coverErrors: {}
-    };
-  },
   computed: {
     ...mapState("lobby", ["roomList"]),
     rooms() {
@@ -63,10 +53,9 @@ export default {
     },
   },
   methods: {
-    editionName(id, customName) {
-      const edition = EDITIONS.get(id);
-      if (edition) return edition.name;
-      return customName || id || "未选择剧本";
+    editionName(id) {
+      const e = EDITIONS.get(id);
+      return e ? e.name : id || "未选择剧本";
     },
     editionImage(id) {
       try {
@@ -74,16 +63,6 @@ export default {
       } catch (e) {
         return require("../assets/editions/custom.png");
       }
-    },
-    coverSrc(room) {
-      const channel = String(room.channel);
-      if (room.editionLogo && !this.coverErrors[channel]) return room.editionLogo;
-      return this.editionImage(room.edition);
-    },
-    onCoverError(room) {
-      const channel = String(room.channel);
-      if (!room.editionLogo || this.coverErrors[channel]) return;
-      this.$set(this.coverErrors, channel, true);
     },
     enterRoom(room) {
       this.$emit("enterRoom", room);
@@ -169,18 +148,16 @@ export default {
 
 .wl-cover {
   flex: none;
-  // 剧本封面多为横幅/长条图，用 contain 保留完整封面。
-  width: 104px;
+  width: 74px;
   height: 74px;
   border-radius: 8px;
   overflow: hidden;
-  background: #0b0b0b;
+  background: #111;
   box-shadow: 0 0 6px black;
   img {
-    display: block;
     width: 100%;
     height: 100%;
-    object-fit: contain;
+    object-fit: cover;
   }
 }
 

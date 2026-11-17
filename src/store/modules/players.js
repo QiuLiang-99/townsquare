@@ -1,5 +1,3 @@
-import Vue from "vue";
-
 const NEWPLAYER = {
   name: "",
   id: "",
@@ -17,17 +15,13 @@ const NEWPLAYER = {
   pronouns: "",
   newMessages: 0,
   chatGroup: "",
-  isTalking: false,
-  // 夜间唤醒助手：该座位在首夜/其他夜的唤醒是否已完成（first/other）
-  nightDone: {}
+  isTalking: false
 };
 
 const state = () => ({
   players: [],
   fabled: [],
   bluffs: [],
-  // 说书人标记：不属于任何玩家，挂在传奇角色区域下方
-  stTokens: [],
   firstNightOrder: [],
   otherNightOrder: []
 });
@@ -134,7 +128,6 @@ const mutations = {
   clear(state, emptyFabled = false) {
     state.players = [];
     state.bluffs = [];
-    state.stTokens = [];
     this.commit("players/setFabled", { fabled: [], emptyFabled });
     // state.fabled = [];
   },
@@ -152,8 +145,7 @@ const mutations = {
   update(state, { player, property, value }) {
     const index = state.players.indexOf(player);
     if (index >= 0) {
-      // 用 Vue.set 确保「新增属性」也能触发响应式（如 nightDone 这类后加的字段）
-      Vue.set(state.players[index], property, value);
+      state.players[index][property] = value;
     }
     if (player.id === this.state.session.playerId) {
       this.commit("players/selfUpdate", {player, property, value});
@@ -229,17 +221,6 @@ const mutations = {
   },
   updateBluff(state, bluffs) {
     state.bluffs = bluffs;
-  },
-  addStToken(state, token) {
-    if (!token) return;
-    state.stTokens.push(token);
-  },
-  removeStToken(state, index) {
-    if (index < 0 || index >= state.stTokens.length) return;
-    state.stTokens.splice(index, 1);
-  },
-  setStTokens(state, tokens) {
-    state.stTokens = Array.isArray(tokens) ? tokens : [];
   },
   setFabled(state, { index, fabled, stImage, stName, emptyFabled = false} = {}) {
     if (!stImage) stImage = this.state.session.playerAvatar;

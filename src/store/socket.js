@@ -1,9 +1,3 @@
-/**
- * 游戏连接、大厅连接及 Vuex mutation 到消息发送的桥接。
- * 说书人生成公开状态投影；玩家接收后提交 mutation，发送端分支负责抑制回流。
- * 聊天的 messageQueue/feedback 与快速唤醒的 outbox/专用回执是两套确认机制。
- * 房间和身份切换后，旧连接回调及任务不得作用于新上下文；具体约束见 docs/protocol.md。
- */
 class LiveSession {
   constructor(store) {
     // 自建后端：默认连同一来源（页面所在的 host），路径 /ws/
@@ -20,12 +14,11 @@ class LiveSession {
     this._isAlive = true;
     this._gamestate = [];
     this._store = store;
-    this._pingInterval = 3 * 1000; // 每 3 秒发送应用层 ping；不同于服务端 30 秒的协议层心跳
+    this._pingInterval = 3 * 1000; // 30 seconds between pings
     this._pingTimer = null;
     this._sendInterval = 1.5 * 1000; // 1.5 seconds between unsent message cycles
     this._sendTimer = null;
     this._reconnectTimer = null;
-    this._quickWakeTimer = null;
     this._players = {}; // map of players connected to a session
     this._pings = {}; // map of player IDs to ping
     // reconnect to previous session
@@ -47,7 +40,7 @@ class LiveSession {
         "/" +
         this._store.state.session.playerId + 
         (!this._isSpectator ? "/host" : "") + 
-        ("?auth=" + encodeURIComponent(this._store.state.session.stSecret))
+        (!this._isSpectator ? "?auth=" + this._store.state.session.stSecret : "")
     );
     if (this._socket === null) {
       this._store.commit("session/setReconnecting", true);
@@ -57,25 +50,12 @@ class LiveSession {
       );
       return;
     }
-    const socket = this._socket;
-    const playerId = this._store.state.session.playerId;
-    this._socketContext = { roomId: String(channel), playerId, isSpectator: this._isSpectator };
-    const isCurrent = () => this._socket === socket &&
-      String(this._store.state.session.sessionId) === String(channel) &&
-      this._store.state.session.playerId === playerId;
-    socket.addEventListener("message", event => { if (isCurrent()) this._handleMessage(event); });
-    socket.onopen = () => {
-      if (!isCurrent()) return;
-      this._store.commit("quickWake/setConnected", true);
-      this._onOpen();
-    };
-    socket.onclose = err => {
-      if (!isCurrent()) return;
-      this._store.commit("quickWake/setConnected", false);
+    this._socket.addEventListener("message", this._handleMessage.bind(this));
+    this._socket.onopen = this._onOpen.bind(this);
+    this._socket.onclose = err => {
       this._socket = null;
       clearTimeout(this._pingTimer);
       this._pingTimer = null;
-      this._stopQuickWakeOutbox();
       if (err.code !== 1000) {
         // connection interrupted, reconnect after 3 seconds
         this._store.commit("session/setReconnecting", true);
@@ -308,36 +288,6 @@ class LiveSession {
       }
     }
     this._ping();
-    this._startQuickWakeOutbox();
-  }
-
-  _sendQuickWakeOutbox() {
-    if (!this._socket || this._socket.readyState !== 1) return;
-    const roomId = this._store.state.session.sessionId;
-    if (!roomId || !this._quickWakeConnectionMatches()) return;
-    const outbox = this._store.state.quickWake.outbox || [];
-    outbox.forEach(item => {
-      if (!item || !item.payload) return;
-      if (item.payload.roomId && String(item.payload.roomId) !== String(roomId)) return;
-      if (item.kind === "message" && !this._isSpectator) {
-        this.sendQuickWakeMessage(item.payload);
-      } else if (item.kind === "reply" && this._isSpectator) {
-        this.sendQuickWakeReply(item.payload);
-      }
-    });
-  }
-
-  _startQuickWakeOutbox() {
-    this._stopQuickWakeOutbox();
-    this._sendQuickWakeOutbox();
-    this._quickWakeTimer = setInterval(() => {
-      this._sendQuickWakeOutbox();
-    }, 2000);
-  }
-
-  _stopQuickWakeOutbox() {
-    clearInterval(this._quickWakeTimer);
-    this._quickWakeTimer = null;
   }
 
   /**
@@ -442,30 +392,6 @@ class LiveSession {
         break;
       case "feedback":
         this._deleteFromQueue(params);
-        break;
-      case "quickWakePresence":
-        this._store.commit("quickWake/setPresence", params);
-        break;
-      case "quickWakeAccepted":
-        this._store.commit("quickWake/applyAccepted", params);
-        break;
-      case "quickWakeStatus":
-        this._store.commit("quickWake/applyStatus", params);
-        break;
-      case "quickWakeSync":
-        this._store.commit("quickWake/syncMessages", params);
-        break;
-      case "quickWakeIncoming":
-        this._handleQuickWakeIncoming(params);
-        break;
-      case "quickWakeReplyAck":
-        this._store.commit("quickWake/applyReplyAck", params);
-        break;
-      case "quickWakeError":
-        this._store.commit("quickWake/failOutbox", {
-          id: params && params.id,
-          message: (params && params.message) || "快捷唤醒发送失败"
-        });
         break;
       case "nomination":
         if (!this._isSpectator) return;
@@ -573,21 +499,6 @@ class LiveSession {
       case "isReview":
         this._handleSetIsReview(params);
         break;
-      case "reviewRevealed":
-        this._handleSetReviewRevealed(params);
-        break;
-      case "blindDraw":
-        this._handleBlindDraw(params);
-        break;
-      case "blindDrawTaken":
-        this._handleBlindDrawTaken(params);
-        break;
-      case "blindDrawPick":
-        this._handleBlindDrawPick(params);
-        break;
-      case "blindDrawReveal":
-        this._handleBlindDrawReveal(params);
-        break;
       case "setTalking":
         this._handleSetTalking(params);
         break;
@@ -657,7 +568,6 @@ class LiveSession {
    * Close the current session, if any.
    */
   disconnect() {
-    this._store.commit("quickWake/setConnected", false);
     this._pings = {};
     this._store.commit("session/setPlayerCount", 0);
     this._store.commit("session/setPing", 0);
@@ -665,7 +575,6 @@ class LiveSession {
     clearTimeout(this._reconnectTimer);
     clearTimeout(this._store.state.session.joinTimeout);
     clearTimeout(this._store.state.session.hostTimeout);
-    this._stopQuickWakeOutbox();
     if (this._socket) {
       if (this._isSpectator) {
         this._sendDirect("host", "bye", this._store.state.session.playerId);
@@ -673,46 +582,6 @@ class LiveSession {
       this._socket.close(1000);
       this._socket = null;
     }
-  }
-
-  _quickWakeConnectionMatches() {
-    const context = this._socketContext;
-    const session = this._store.state.session;
-    return !!(context && this._socket && this._socket.readyState === 1 &&
-      context.roomId === String(session.sessionId) && context.playerId === session.playerId &&
-      context.isSpectator === session.isSpectator);
-  }
-
-  sendQuickWakeMessage(message) {
-    if (this._isSpectator || !message || !this._quickWakeConnectionMatches()) return;
-    const session = this._store.state.session;
-    if (message.roomId !== String(session.sessionId) || message.senderPlayerId !== session.playerId) return;
-    if (!this._store.state.players.players.some(player => player.id === message.targetPlayerId)) {
-      this._store.commit("quickWake/failOutbox", { id: message.id, message: "目标玩家已离座，消息未发送。" });
-      return;
-    }
-    this._send("quickWakeSeats", this._store.state.players.players.map(player => player.id).filter(Boolean));
-    this._send("quickWakeSend", message);
-  }
-
-  sendQuickWakeReply(reply) {
-    if (!this._isSpectator || !reply || !this._quickWakeConnectionMatches()) return;
-    if (reply.roomId !== String(this._store.state.session.sessionId) || reply.playerId !== this._store.state.session.playerId) return;
-    this._send("quickWakeReply", reply);
-  }
-
-  sendQuickWakeReceipt(wakeId) {
-    if (!this._isSpectator || !wakeId || !this._quickWakeConnectionMatches()) return;
-    this._send("quickWakeReceipt", {
-      wakeId,
-      roomId: this._store.state.session.sessionId
-    });
-  }
-
-  _handleQuickWakeIncoming(message) {
-    if (!message || message.roomId !== String(this._store.state.session.sessionId) || message.targetPlayerId !== this._store.state.session.playerId) return;
-    this._store.commit("quickWake/receiveIncoming", message);
-    this.sendQuickWakeReceipt(message.id);
   }
 
   /**
@@ -870,9 +739,6 @@ class LiveSession {
       name: session.sessionName || "",
       stName: session.playerName || "",
       edition: edition.id || "tb",
-      editionName: edition.name || "",
-      // 剧本封面：自定义/剧本库导入的剧本在 _meta.logo 里带了封面图
-      editionLogo: /^https?:\/\//i.test(edition.logo || "") ? edition.logo : "",
       maxPlayers: players.length
     });
   }
@@ -885,12 +751,7 @@ class LiveSession {
       name: player.name,
       id: player.id,
       image: player.image,
-      // 复盘视角下把说书人的提醒标记下发给玩家观看。这里直接从当前 reminders 实时派生
-      // （去掉自定义提醒），不再读 player.stReminders —— 后者是只在添加/删除时更新的影子副本，
-      // 换角色/新开一局等路径不会同步，会让玩家看到过时（已移除/已换角色）的残留 token。
-      stReminders: this._store.state.session.isReview
-        ? player.reminders.filter(reminder => reminder.role !== "custom")
-        : [],
+      stReminders: this._store.state.session.isReview ? player.stReminders : [],
       isDead: player.isDead,
       isVoteless: player.isVoteless,
       votes: player.votes,
@@ -925,11 +786,6 @@ class LiveSession {
         isUseOldOrder: session.isUseOldOrder,
         isUseOldRole: session.isUseOldRole,
         isReview: session.isReview,
-        reviewRevealed: session.isReview ? session.reviewRevealed : [],
-        // 盲抽只下发槽位数量与已抽记录（槽位->谁抽走），绝不下发角色内容，避免泄露身份
-        blindDrawActive: session.blindDrawActive,
-        blindDrawCount: session.blindDrawActive ? session.blindDrawRoles.length : 0,
-        blindDrawTaken: session.blindDrawActive ? session.blindDrawTaken : [],
         nomination: session.nomination,
         votingSpeed: session.votingSpeed,
         lockedVote: session.lockedVote,
@@ -989,10 +845,6 @@ class LiveSession {
       isUseOldOrder,
       isUseOldRole,
       isReview,
-      reviewRevealed,
-      blindDrawActive,
-      blindDrawCount,
-      blindDrawTaken,
       nomination,
       votingSpeed,
       votes,
@@ -1058,11 +910,6 @@ class LiveSession {
       this._store.commit("session/setUseOldOrder", isUseOldOrder);
       this._store.commit("session/setUseOldRole", isUseOldRole);
       this._store.commit("session/setIsReview", isReview);
-      this._store.commit("session/setReviewRevealed", isReview ? reviewRevealed : []);
-      // 盲抽：玩家端只需 active + 槽位数量 + 已抽记录（角色内容不下发，靠 host 私发）
-      this._store.commit("session/setBlindDrawActive", !!blindDrawActive);
-      this._store.commit("session/setBlindDrawCount", blindDrawActive ? (blindDrawCount || 0) : 0);
-      this._store.commit("session/setBlindDrawTaken", blindDrawActive ? (blindDrawTaken || []) : []);
       const nominatedPlayer = nomination.length ? players[nomination[1]] : null;
       this._store.commit("session/nomination", {
         nomination,
@@ -1074,8 +921,6 @@ class LiveSession {
       });
       this._store.commit("session/setMarkedPlayer", {val: markedPlayer, force: false});
       this._store.commit("players/setFabled", {fabled});
-      // 说书人标记只属于说书人自己，不下发给玩家/旁观者，收到任何 gamestate 时清空本地残留
-      this._store.commit("players/setStTokens", []);
       this._store.commit("setStates", states);
       this._store.commit("setTeamsNames", teamsNames);
       this._store.commit("setFirstNight", firstNight);
@@ -1779,10 +1624,8 @@ class LiveSession {
           ]);
         }
         if (all) {
-          // 从当前 reminders 实时派生（去掉自定义提醒），保证下发内容与说书人当前标记一致，
-          // 不读会残留过时数据的 player.stReminders 影子副本。
           message.stReminders.push([
-            { index, property: "stReminder", value: player.reminders.filter(reminder => reminder.role !== "custom") }
+            { index, property: "stReminder", value: player.stReminders }
           ]);
         }
       });
@@ -1858,15 +1701,15 @@ class LiveSession {
         });
       })
     }
-    // set stReminders（全量同步：说书人处为空也必须下发覆盖，否则玩家端会残留上一次复盘的旧标记）
+    // set stReminders
     if (payload.stReminders) {
       payload.stReminders.forEach(grimReminder => {
+        if (!grimReminder[0].value.length) return
         const player = this._store.state.players.players[grimReminder[0].index];
-        const value = Array.isArray(grimReminder[0].value) ? grimReminder[0].value : [];
         this._store.commit("players/update", {
           player,
           property: "stReminders",
-          value
+          value: grimReminder[0].value
         });
       })
     }
@@ -2031,10 +1874,6 @@ class LiveSession {
 
   setIsReview(isReview){
     if (this._isSpectator) return;
-    // 说书人本地也要清空揭示状态（服务端只在玩家端回放清空）
-    if (!isReview) {
-      this._store.state.session.reviewRevealed = [];
-    }
     this._send("isReview", isReview);
   }
 
@@ -2042,7 +1881,6 @@ class LiveSession {
     if (!this._isSpectator) return;
     this._store.state.session.isReview = isReview;
     if (!isReview) {
-      this._store.state.session.reviewRevealed = [];
       this._store.state.players.players.forEach(player => {
         this._store.commit("players/update", {
           player,
@@ -2051,149 +1889,6 @@ class LiveSession {
         });
       });
     }
-  }
-
-  /**
-   * 复盘视角：说书人点开/收起某个座位，广播给全房间
-   * @param revealedIndexes 当前被揭示的座位下标数组
-   */
-  sendReviewRevealed(revealedIndexes){
-    if (this._isSpectator) return;
-    this._send("reviewRevealed", revealedIndexes);
-  }
-
-  _handleSetReviewRevealed(revealedIndexes){
-    if (!this._isSpectator) return;
-    this._store.state.session.reviewRevealed = Array.isArray(revealedIndexes) ? [...revealedIndexes] : [];
-  }
-
-  /**
-   * 盲抽角色：说书人开启/关闭盲抽，广播给全房间。
-   * payload = { active: true/false, count: 槽位数量 }（不含角色内容）
-   */
-  sendBlindDraw(payload){
-    if (this._isSpectator) return;
-    this._send("blindDraw", payload);
-  }
-
-  _handleBlindDraw(payload){
-    if (!this._isSpectator) return;
-    const active = !!(payload && payload.active);
-    this._store.commit("session/setBlindDrawActive", active);
-    if (active) {
-      this._store.commit("session/setBlindDrawCount", payload && payload.count ? payload.count : 0);
-    }
-  }
-
-  /**
-   * 盲抽角色：玩家抽走某个槽位 → 直接告诉说书人（点对点），不广播。
-   * 说书人收到后登记谁抽走哪个槽位，再把该槽位的角色私发回该玩家。
-   */
-  sendBlindDrawPick(slot){
-    // 玩家发起：玩家端 _isSpectator 为 true，这里不能因 isSpectator 而拦截
-    if (!Number.isFinite(slot)) return;
-    this._sendDirect("host", "blindDrawPick", {
-      slot,
-      playerId: this._store.state.session.playerId
-    });
-  }
-
-  // 说书人收到玩家的抽牌请求：登记已抽 + 私发角色给该玩家 + 广播已抽记录
-  _handleBlindDrawPick(pick){
-    if (this._isSpectator) return; // 仅说书人处理
-    if (!pick || typeof pick.slot !== "number") return;
-    const roles = this._store.state.session.blindDrawRoles || [];
-    const slot = pick.slot;
-    if (slot < 0 || slot >= roles.length) return;
-    const taken = this._store.state.session.blindDrawTaken || [];
-    // 已被别人抽走 → 忽略
-    if (taken.some(t => t.slot === slot)) return;
-    const playerId = pick.playerId;
-    const players = this._store.state.players.players || [];
-    const seat = players.findIndex(p => p.id && p.id === playerId);
-    if (seat < 0) return;
-    const name = players[seat].name || "";
-    const newTaken = taken.concat([{ slot, seat, name, playerId }]);
-    // commit 会触发 store.subscribe → sendBlindDrawTaken 广播给全房间
-    this._store.commit("session/setBlindDrawTaken", newTaken);
-    // 私发该槽位的角色给抽到的玩家
-    this._sendDirect(playerId, "blindDrawReveal", { slot, role: roles[slot] });
-  }
-
-  _handleBlindDrawReveal(reveal){
-    if (!this._isSpectator) return;
-    if (!reveal || typeof reveal.slot !== "number") return;
-    // 记录本玩家抽到的槽位与角色（本地），供渲染"自己抽到的牌"
-    this._store.commit("session/setBlindDrawMyPick", { slot: reveal.slot, role: reveal.role });
-  }
-
-  /**
-   * 盲抽角色：玩家抽走某一张牌后，广播"槽位 -> 谁抽走了"给全房间（不泄露抽到什么角色）。
-   * 说书人本地也维护同一份 blindDrawTaken。
-   */
-  sendBlindDrawTaken(taken){
-    if (this._isSpectator) return;
-    this._send("blindDrawTaken", taken);
-  }
-
-  _handleBlindDrawTaken(taken){
-    if (!this._isSpectator) return;
-    this._store.commit("session/setBlindDrawTaken", taken);
-  }
-
-  /**
-   * 说书人点「分配已抽取角色至魔典 / 随机分配剩余角色」。
-   * 按抽取顺序把每个槽位的角色分给对应座位；未抽完的剩余槽位随机补齐给未抽到的非旅行者座位。
-   */
-  blindDrawFinish(){
-    if (this._isSpectator) return;
-    const session = this._store.state.session;
-    const roles = (session.blindDrawRoles || []).slice();
-    const taken = (session.blindDrawTaken || []).slice();
-    const players = this._store.state.players.players || [];
-    // 每个座位的角色（按 slots 索引）
-    const seatRole = {}; // seatIndex -> role
-    const usedSlots = new Set();
-    // 1) 已抽的：按抽取记录把 slot 的角色给对应座位
-    taken.forEach(rec => {
-      if (rec.slot >= 0 && rec.slot < roles.length) {
-        const seatIdx = players.findIndex(p => p.id && p.id === rec.playerId);
-        if (seatIdx >= 0) {
-          seatRole[seatIdx] = roles[rec.slot];
-          usedSlots.add(rec.slot);
-        }
-      }
-    });
-    // 2) 剩余角色池：未被抽走的槽位
-    const remainingRoles = [];
-    for (let i = 0; i < roles.length; i++) {
-      if (!usedSlots.has(i)) remainingRoles.push(roles[i]);
-    }
-    // 打乱
-    for (let i = remainingRoles.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [remainingRoles[i], remainingRoles[j]] = [remainingRoles[j], remainingRoles[i]];
-    }
-    // 3) 未抽到的非旅行者座位按顺序补齐（含空座位：剩余角色要摆满魔典，不仅发给已落座玩家）
-    let ri = 0;
-    players.forEach((p, idx) => {
-      if (seatRole[idx]) return;
-      if (p.role && p.role.team === "traveler") return;
-      if (ri < remainingRoles.length) {
-        seatRole[idx] = remainingRoles[ri];
-        ri++;
-      }
-    });
-    // 4) 先广播「盲抽关闭」，再发牌。
-    //    原因：setBlindDrawActive(false) 会触发 gamestate 广播，若放到 newGame 之后，
-    //    这次 gs 里的 blindDrawActive 仍是 true，可能晚于关闭帧到达玩家端，导致玩家窗口被重新打开、
-    //    永远关不掉。这里先关闭（此时 roles/taken 已快照到本地变量，关闭清空不影响发放），
-    //    再执行 newGame 发牌，玩家端只会收到 active:false 的关闭帧。
-    this._store.commit("session/setBlindDrawActive", false);
-    // 5) 走 newGame 统一复位并逐座位发牌
-    this._store.dispatch("newGame", {
-      pickRole: (player, idx) => seatRole[idx] || player.role
-    });
   }
 
   /**
@@ -2644,7 +2339,6 @@ class LiveSession {
   }
 }
 
-/** 大厅维护公开房间列表，使用独立 WS；房间内游戏状态不通过此连接同步。 */
 class LiveLobby {
   constructor(store) {
     // 自建后端：大厅默认连同一来源，路径 /lobby/
@@ -3028,26 +2722,6 @@ export default store => {
         session.setIsReview(payload);
         if (payload) session.distributeGrimoire({all: true});
         break;
-      case "session/setReviewRevealed":
-        // 说书人点开/收起某个座位 → 广播给全房间（仅说书人触发；玩家端仅接收）
-        session.sendReviewRevealed(payload);
-        break;
-      case "session/setBlindDrawActive":
-        // 说书人开启/关闭盲抽 → 广播 active + 槽位数量（不下发角色内容）
-        session.sendBlindDraw({ active: payload, count: state.session.blindDrawCount });
-        break;
-      case "session/setBlindDrawTaken":
-        // 有玩家抽走某张牌 → 广播牌堆下标->抽取者（仅说书人侧触发）
-        session.sendBlindDrawTaken(payload);
-        break;
-      case "session/blindDrawPick":
-        // 玩家点了某个槽位 → 私发说书人请求该槽位的角色（payload 即槽位下标数字）
-        session.sendBlindDrawPick(payload);
-        break;
-      case "session/blindDrawFinish":
-        // 说书人点了「分配/随机补齐」→ 执行发牌
-        session.blindDrawFinish();
-        break;
       // case "session/setBootlegger":
       //   session.setBootlegger(payload);
       //   break;
@@ -3056,12 +2730,6 @@ export default store => {
         break;
       case "session/setIsRole":
         session.setIsRole(payload);
-        break;
-      case "quickWake/enqueueMessage":
-        session.sendQuickWakeMessage(payload);
-        break;
-      case "quickWake/enqueueReply":
-        session.sendQuickWakeReply(payload);
         break;
     }
   });
