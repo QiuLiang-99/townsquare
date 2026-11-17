@@ -68,6 +68,8 @@ const state = () => ({
     lycanthrope: false
   },
   isReview: false,
+  // 复盘视角：被说书人点开揭示的座位下标数组；-1 表示无。所有端同步。
+  reviewRevealed: [],
   isChatOpen: false,
   isTyping: false,
   messageQueue: [],
@@ -82,6 +84,18 @@ const state = () => ({
   inputRejecter: null,
   bootlegger: "",
   drawRoles: [],
+  // 盲抽角色：一场盲抽的状态。说书人开启后所有落座玩家全屏看到牌堆，先点先得。
+  // blindDrawActive: 是否正在进行盲抽（为 true 时玩家端强制全屏弹窗）
+  blindDrawActive: false,
+  // blindDrawRoles: 本局所有待盲抽的角色（完整角色对象数组，顺序即牌堆顺序）。仅说书人本地持有，不下发。
+  blindDrawRoles: [],
+  // blindDrawCount: 牌堆槽位数量（下发给玩家，玩家据此渲染 face-down 槽位，不知道每个槽位的角色）
+  blindDrawCount: 0,
+  // blindDrawTaken: 已被抽走的牌记录，数组，每项 { slot: 槽位下标, seat: 座位号, name: 抽取者名字, playerId }
+  //   只公开"哪个槽位被谁抽走"，不公开抽到的是什么角色（只有抽取者本人经 host 私发收到自己的牌）。
+  blindDrawTaken: [],
+  // blindDrawMyPick: 玩家本人抽到的 { slot, role }（仅玩家端本地持有，用于渲染自己那张牌）
+  blindDrawMyPick: null,
   timer: 480,
   startTime: null,
   lastUpdateTime: null,
@@ -129,6 +143,9 @@ const mutations = {
   setUseOldOrder: set("isUseOldOrder"),
   setUseOldRole: set("isUseOldRole"),
   setIsReview: set("isReview"),
+  setReviewRevealed(state, val) {
+    state.reviewRevealed = Array.isArray(val) ? [...val] : [];
+  },
   setInputResolver(state, resolver) {
     state.inputResolver = resolver;
   },
@@ -167,6 +184,42 @@ const mutations = {
   setDrawRoles(state, roles){
     if (!Array.isArray(roles)) return;
     state.drawRoles = [...roles];
+  },
+  // 盲抽角色
+  setBlindDrawActive(state, val){
+    state.blindDrawActive = !!val;
+    if (!val) {
+      // 结束盲抽时清空牌堆、槽位数与已抽记录
+      state.blindDrawRoles = [];
+      state.blindDrawCount = 0;
+      state.blindDrawTaken = [];
+      state.blindDrawMyPick = null;
+    }
+  },
+  setBlindDrawRoles(state, roles){
+    state.blindDrawRoles = Array.isArray(roles) ? [...roles] : [];
+    state.blindDrawCount = state.blindDrawRoles.length;
+  },
+  setBlindDrawCount(state, n){
+    state.blindDrawCount = Number(n) || 0;
+  },
+  setBlindDrawTaken(state, taken){
+    state.blindDrawTaken = Array.isArray(taken)
+      ? taken.map(t => ({ slot: t.slot, seat: t.seat, name: t.name, playerId: t.playerId }))
+      : [];
+  },
+  setBlindDrawMyPick(state, pick){
+    state.blindDrawMyPick = (pick && typeof pick.slot === "number")
+      ? { slot: pick.slot, role: pick.role || {} }
+      : null;
+  },
+  // 玩家点击某个槽位抽牌 → 信号 mutation：socket 插件监听后向说书人私发请求
+  blindDrawPick(state, slot){
+    state._blindDrawPickTick = { slot: slot, t: Date.now() };
+  },
+  // 说书人点「分配/随机补齐」→ 信号 mutation：socket 插件监听后执行分配
+  blindDrawFinish(state){
+    state._blindDrawFinishTick = (state._blindDrawFinishTick || 0) + 1;
   },
   nomination(
     state,
@@ -269,7 +322,12 @@ const mutations = {
   },
   updateChatReceived(state, {message, playerId}){
     if (state.isSpectator && playerId != state.stId) return;
-    const playerIndex = chatIndex(state, playerId);
+    let playerIndex = chatIndex(state, playerId);
+    if (playerIndex < 0) {
+      // 还没有这个会话的聊天记录就先建一个，避免发送方本地回显时找不到记录而报错/丢消息
+      Vue.set(state.chatHistory, state.chatHistory.length, {id: playerId, chat: []});
+      playerIndex = state.chatHistory.length - 1;
+    }
     const oldMessages = state.chatHistory[playerIndex]["chat"];
     Vue.set(state.chatHistory, playerIndex, {id: playerId, chat: [...oldMessages, message]})
   },

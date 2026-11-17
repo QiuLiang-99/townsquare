@@ -5,13 +5,7 @@
     <span
       class="icon"
       v-if="role.id"
-      :style="{
-        backgroundImage: `url(${
-          role.image && grimoire.isImageOptIn
-            ? role.image
-            : require('../assets/icons/' + (role.imageAlt || role.id.replace(/old1$/, '')) + '.png')
-        })`
-      }"
+      :style="{ backgroundImage: `url(${roleIconUrl(role, grimoire, iconStatusRev)})` }"
     ></span>
     <span
       class="leaf-left"
@@ -51,9 +45,12 @@
 
 <script>
 import { mapState } from "vuex";
+import { roleIconUrl } from "../logic/roleIcon";
+import iconMixin from "../logic/iconMixin";
 
 export default {
   name: "Token",
+  mixins: [iconMixin],
   props: {
     role: {
       type: Object,
@@ -102,6 +99,7 @@ export default {
     nameToFontSize: name => (name && name.length > 10 ? "90%" : "110%")
   },
   methods: {
+    roleIconUrl,
     setRole() {
       this.$emit("set-role");
     }

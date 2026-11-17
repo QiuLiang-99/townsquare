@@ -3,19 +3,20 @@
     <div class="modal-backdrop" @click="closeCheck">
       <div
         class="modal"
-        :class="{ maximized: isMaximized, [name]: true }"
+        :class="{ maximized: isMaximized || forceMaximized, [name]: true }"
         role="dialog"
         aria-labelledby="modalTitle"
         aria-describedby="modalDescription"
         @click.stop=""
       >
-        <div class="top-right-buttons" v-if="name != 'input'">
+        <div class="top-right-buttons" v-if="name != 'input' && !forceMaximized">
           <font-awesome-icon
             @click="isMaximized = !isMaximized"
             class="top-right-button"
             :icon="['fas', isMaximized ? 'window-minimize' : 'window-maximize']"
           />
           <font-awesome-icon
+            v-if="dismissible"
             @click="close"
             class="top-right-button"
             icon="times-circle"
@@ -39,6 +40,15 @@ export default {
     type: {
       type: String,
       default: ""
+    },
+    dismissible: {
+      type: Boolean,
+      default: true
+    },
+    // 强制最大化（铺满全屏），且不显示最大化/最小化按钮（用于盲抽等全场强制窗口）
+    forceMaximized: {
+      type: Boolean,
+      default: false
     }
   },
   data: function() {
@@ -48,9 +58,11 @@ export default {
   },
   methods: {
     close() {
+      if (!this.dismissible) return;
       this.$emit("close");
     },
     closeCheck() {
+      if (!this.dismissible) return;
       // 输入时点击背景不关闭
       if (this.name === "input" && this.type === "input") return;
       this.close();

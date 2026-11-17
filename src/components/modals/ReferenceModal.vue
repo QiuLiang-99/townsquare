@@ -41,15 +41,7 @@
           <span
             class="icon"
             v-if="role.id && team != '状态'"
-            :style="{
-              backgroundImage: `url(${
-                role.image && grimoire.isImageOptIn
-                  ? role.image
-                  : require('../../assets/icons/' +
-                      (role.imageAlt || role.id.replace(/old1$/, '')) +
-                      '.png')
-              })`
-            }"
+            :style="{ backgroundImage: `url(${roleIconUrl(role, grimoire, iconStatusRev)})` }"
           ></span>
           <div class="role">
             <span class="player" v-if="Object.keys(playersByRole).length">{{
@@ -115,8 +107,11 @@
 <script>
 import Modal from "./Modal";
 import { mapMutations, mapState } from "vuex";
+import { roleIconUrl } from "../../logic/roleIcon";
+import iconMixin from "../../logic/iconMixin";
 
 export default {
+  mixins: [iconMixin],
   components: {
     Modal
   },
@@ -199,6 +194,7 @@ export default {
     ...mapState("players", ["players"])
   },
   methods: {
+    roleIconUrl,
     ...mapMutations(["toggleModal"])
   }
 };
