@@ -145,6 +145,12 @@ module.exports = store => {
     }
   }
   {
+    const v = safeParse("stTokens");
+    if (Array.isArray(v)) {
+      store.commit("players/setStTokens", v);
+    }
+  }
+  {
     const v = safeParse("players");
     if (Array.isArray(v)) {
       store.commit(
@@ -358,6 +364,11 @@ module.exports = store => {
           "fabled",
           JSON.stringify(state.players.fabled)
         );
+        break;
+      case "players/addStToken":
+      case "players/removeStToken":
+      case "players/setStTokens":
+        safeSetJSON("stTokens", state.players.stTokens);
         break;
       case "players/add":
       case "players/update":

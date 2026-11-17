@@ -1068,6 +1068,8 @@ class LiveSession {
       });
       this._store.commit("session/setMarkedPlayer", {val: markedPlayer, force: false});
       this._store.commit("players/setFabled", {fabled});
+      // 说书人标记只属于说书人自己，不下发给玩家/旁观者，收到任何 gamestate 时清空本地残留
+      this._store.commit("players/setStTokens", []);
       this._store.commit("setStates", states);
       this._store.commit("setTeamsNames", teamsNames);
       this._store.commit("setFirstNight", firstNight);

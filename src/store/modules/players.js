@@ -26,6 +26,8 @@ const state = () => ({
   players: [],
   fabled: [],
   bluffs: [],
+  // 说书人标记：不属于任何玩家，挂在传奇角色区域下方
+  stTokens: [],
   firstNightOrder: [],
   otherNightOrder: []
 });
@@ -132,6 +134,7 @@ const mutations = {
   clear(state, emptyFabled = false) {
     state.players = [];
     state.bluffs = [];
+    state.stTokens = [];
     this.commit("players/setFabled", { fabled: [], emptyFabled });
     // state.fabled = [];
   },
@@ -226,6 +229,17 @@ const mutations = {
   },
   updateBluff(state, bluffs) {
     state.bluffs = bluffs;
+  },
+  addStToken(state, token) {
+    if (!token) return;
+    state.stTokens.push(token);
+  },
+  removeStToken(state, index) {
+    if (index < 0 || index >= state.stTokens.length) return;
+    state.stTokens.splice(index, 1);
+  },
+  setStTokens(state, tokens) {
+    state.stTokens = Array.isArray(tokens) ? tokens : [];
   },
   setFabled(state, { index, fabled, stImage, stName, emptyFabled = false} = {}) {
     if (!stImage) stImage = this.state.session.playerAvatar;
