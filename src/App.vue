@@ -49,6 +49,12 @@
     <DirectedWakeModal/>
     <PlayerWakeModal/>
     <Gradients />
+    <!-- 标记自动清理后的撤回条 -->
+    <div class="undo-bar" v-if="undoBar">
+      <span class="ub-text">{{ undoBar.text }}</span>
+      <button type="button" class="ub-undo" v-if="undoBar.groups && undoBar.groups.length" @click.stop="undoRemoved">撤回</button>
+      <button type="button" class="ub-close" @click.stop="undoBar = null">×</button>
+    </div>
     <!-- <span id="version">v{{ version }}</span> -->
   </div>
 </template>
@@ -116,7 +122,10 @@ export default {
   },
   data() {
     return {
-      version
+      version,
+      // 标记自动清理的撤回条
+      undoBar: null,
+      undoTimer: null
     };
   },
   async mounted() {
@@ -175,11 +184,52 @@ export default {
     }
 
     document.addEventListener("visibilitychange", this.handleVisibilityChange);
+    // 角色死亡 / 换角色时，子组件会发这个事件，弹出 5 秒可撤回的提示条
+    this.$root.$on("undo-reminders", this.showUndoBar);
   },
   beforeDestroy() {
     document.removeEventListener("visibilitychange", this.handleVisibilityChange);
+    this.$root.$off("undo-reminders", this.showUndoBar);
+    if (this.undoTimer) clearTimeout(this.undoTimer);
   },
   methods: {
+    /** 弹出提示条（带撤回按钮），5 秒后自己消失 */
+    showUndoBar(payload) {
+      if (!payload || !payload.text) return;
+      this.undoBar = payload;
+      if (this.undoTimer) clearTimeout(this.undoTimer);
+      this.undoTimer = setTimeout(() => {
+        this.undoBar = null;
+        this.undoTimer = null;
+      }, 5000);
+    },
+    /** 点「撤回」：把标记原样放回各自座位（整份列表还原，避免重复/遗漏） */
+    undoRemoved() {
+      if (!this.undoBar) return;
+      const bar = this.undoBar;
+      if (this.undoTimer) clearTimeout(this.undoTimer);
+      this.undoTimer = null;
+      this.undoBar = null;
+      let count = 0;
+      bar.groups.forEach(group => {
+        const player = this.players[group.index];
+        if (!player) return;
+        this.$store.commit("players/update", {
+          player,
+          property: "reminders",
+          value: Array.isArray(group.prevReminders) ? group.prevReminders : []
+        });
+        if (!this.session.isSpectator) {
+          this.$store.commit("players/update", {
+            player,
+            property: "stReminders",
+            value: Array.isArray(group.prevStReminders) ? group.prevStReminders : []
+          });
+        }
+        count += (group.items || []).length;
+      });
+      this.showUndoBar({ text: `已撤回：${count} 个标记已放回原座位。` });
+    },
     handleVisibilityChange(){
       this.$store.commit("lobby/setAllowConnect", document.visibilityState === "visible");
     },
@@ -530,5 +580,57 @@ video#background {
 
 #app:focus {
   outline: none;
+}
+
+/* 标记自动清理的撤回条 */
+.undo-bar {
+  position: fixed;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 400;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: min(760px, 92vw);
+  padding: 10px 14px;
+  border-radius: 8px;
+  background: rgba(18, 18, 18, 0.94);
+  border: 2px solid #f6d66a;
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.6);
+  color: #eee;
+  font-size: 15px;
+  line-height: 1.35;
+  .ub-text {
+    flex: 1;
+    min-width: 0;
+  }
+  .ub-undo {
+    flex: none;
+    cursor: pointer;
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid #f6d66a;
+    background: transparent;
+    color: #f6d66a;
+    font-size: 14px;
+    &:hover {
+      background: #f6d66a;
+      color: #111;
+    }
+  }
+  .ub-close {
+    flex: none;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.55);
+    font-size: 18px;
+    line-height: 1;
+    padding: 0 2px;
+    &:hover {
+      color: #fff;
+    }
+  }
 }
 </style>

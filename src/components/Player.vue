@@ -310,6 +310,7 @@
 
 <script>
 import Token from "./Token";
+import { sweepAndCommit, describeRemoved } from "../logic/reminders";
 import { mapGetters, mapState } from "vuex";
 // import Vue from "vue";
 
@@ -501,7 +502,8 @@ export default {
         if (this.session.isSpectator) return;
         this.toggleReviewReveal();
       } else {
-        this.updatePlayer("isDead", !this.player.isDead);
+        const dying = !this.player.isDead;
+        this.updatePlayer("isDead", dying);
         if (this.player.isMarked) {
           this.updatePlayer("isMarked", false);
         }
@@ -512,7 +514,27 @@ export default {
           this.updatePlayer("isSecretVoteless", false);
           this.updatePlayer("isVoteless", false);
         }
+        // 死亡后，这个角色自己带来的标记就失效了（「干扰项」「保护」这类，
+        // 不管挂在自己身上还是别人身上都要摘掉）；复活不会自动放回
+        if (dying) this.dropRoleReminders();
       }
+    },
+    /**
+     * 把「该角色自己带来的、非全局」标记从全场摘掉，并弹可撤回提示条。
+     * 标记可能挂在别人座位上，所以必须扫全场。
+     */
+    dropRoleReminders() {
+      const role = this.player.role || {};
+      if (!role.id) return;
+      const groups = sweepAndCommit(this.$store, this.players, role);
+      if (!groups.length) return;
+      this.$root.$emit("undo-reminders", {
+        text: `${this.player.name} 已死亡，自动移除「${role.name}」带来的标记：${describeRemoved(
+          groups,
+          this.index
+        )}`,
+        groups
+      });
     },
     // 说书人切换到该座位是否被揭示（写共享状态，socket 插件会广播给全房间）
     toggleReviewReveal() {
