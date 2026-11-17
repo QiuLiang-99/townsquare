@@ -1,3 +1,8 @@
+/**
+ * 快速唤醒本地历史及 outbox 按 roomId/playerId 隔离，预设跨房间保留。
+ * 安装在基础 persistence 后、socket 前；切换上下文先 hydrate，避免空状态覆盖历史。
+ * 浏览器保存只用于本地恢复；服务端记录仍在内存，存储失败时只能继续当前会话。
+ */
 import {
   PRESETS_STORAGE_KEY,
   historyStorageKey,

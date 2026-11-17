@@ -1,3 +1,9 @@
+/**
+ * 旧有本地状态恢复与 mutation 持久化，先于快速唤醒持久化和 socket 插件安装。
+ * 先恢复剧本/座位，再恢复 playerId、浏览器凭证和会话，供后续连接使用。
+ * 历史键并非全部按房间隔离，部分读取仍直接解析 JSON；限制及迁移待办见 TODO.md。
+ * safeStorage 失败时只维持本次内存会话，不保证刷新或服务器重启后的恢复。
+ */
 const { createSessionStorage } = require("./safeStorage");
 
 module.exports = store => {

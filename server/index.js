@@ -1,7 +1,8 @@
 /**
  * TownSquare 自建后端
  * ---------------------------------------------------------------
- * 为 limpy01/townsquare 前端实现官方私有后端 (api.botcgrimoire.top + ws.botcgrimoire.top) 的等价服务。
+ * 为 limpy01/townsquare 前端提供可自建的 HTTP/WS 后端，协议以当前代码及 docs/protocol.md 为准。
+ * 不承诺与官方私有后端的全部行为等价。
  *
  * 组成：
  *   1) HTTP API
@@ -24,7 +25,8 @@
  *   - 玩家连接也携带浏览器 secret；稳定 ID 首次加入后绑定该凭证，重连必须匹配
  *   - ping / pong / bye 玩家计数与延迟
  *
- * 设计原则：本服务是**无状态中继 + 轻量状态协调**，不做游戏逻辑（游戏状态全部在前端 host）。
+ * 状态归属：主要游戏状态由前端 host 编排；本进程保存房间、身份绑定、公开 gs 缓存和
+ * 快速唤醒记录，重启即失。普通转发并非完整授权；实际校验见各消息处理分支。
  */
 "use strict";
 
@@ -53,26 +55,18 @@ if (!fs.existsSync(AVATAR_DIR)) fs.mkdirSync(AVATAR_DIR, { recursive: true });
 
 // ------------------------------------------------------------------ 内存状态
 /**
- * rooms[channel] = {
- *   host: { ws, playerId, auth, connectedAt } | null,
- *   players: Map<playerId, { ws, ping, connectedAt }>,
- *   createdAt,
- *   everHadHost,
- *   meta: {                      // 大厅展示用的房间元数据（说书人上报）
- *     name: "房间名",            // 为空则前端用房间号兜底
- *     stName: "说书人昵称",
- *     edition: "tb",            // 剧本 id
- *     maxPlayers: 12,           // 最大人数（建房时填的玩家人数）
- *     playerCount: 12,          // 座位数（= maxPlayers）
- *   },
- * }
- * 重启即失——与前端"本地 + 说书人为权威"的模型一致；如需持久化可外挂 SQLite。
+ * rooms 是房间号到房间状态的 Map。房间创建时包含 host/hostIdentity、players、
+ * createdAt、everHadHost、meta、quickWake 和 lastGs；玩家首次加入后另建 playerIdentities。
+ * meta 保存说书人上报的大厅展示信息，maxPlayers 是展示用座位数，不是加入授权上限。
+ * lastGs 仅保存 host 完整普通广播的公开快照；direct/lightweight 及增量更新不刷新它。
+ * 复盘、盲抽及快速唤醒座位身份等字段按对应命令更新，不能据此还原完整私密游戏状态。
+ * 这些数据仅存于进程内存；浏览器本地恢复与头像磁盘存储是独立机制，见 docs/architecture.md。
  */
 const rooms = new Map();
-/** lobbyClients: Set<{ ws, playerId, roomsSnapshot }> */
+/** lobbyClients: Set<{ ws, playerId }>，独立连接收到 setRooms 及后续房间变更。 */
 const lobbyClients = new Set();
 
-// 房间宽限期（毫秒）：说书人断开后，房间保留这么久等待重连，避免瞬间消失。
+// 空房宽限期（毫秒）：仅无 host 且无玩家时开始回收，重连可取消；主动解散立即回收。
 const ROOM_GRACE_MS = parseInt(process.env.ROOM_GRACE_MS || "60000", 10);
 /** roomCleanupTimers: Map<channel, timeoutId> */
 const roomCleanupTimers = new Map();

@@ -1,3 +1,9 @@
+/**
+ * 游戏连接、大厅连接及 Vuex mutation 到消息发送的桥接。
+ * 说书人生成公开状态投影；玩家接收后提交 mutation，发送端分支负责抑制回流。
+ * 聊天的 messageQueue/feedback 与快速唤醒的 outbox/专用回执是两套确认机制。
+ * 房间和身份切换后，旧连接回调及任务不得作用于新上下文；具体约束见 docs/protocol.md。
+ */
 class LiveSession {
   constructor(store) {
     // 自建后端：默认连同一来源（页面所在的 host），路径 /ws/
@@ -14,7 +20,7 @@ class LiveSession {
     this._isAlive = true;
     this._gamestate = [];
     this._store = store;
-    this._pingInterval = 3 * 1000; // 30 seconds between pings
+    this._pingInterval = 3 * 1000; // 每 3 秒发送应用层 ping；不同于服务端 30 秒的协议层心跳
     this._pingTimer = null;
     this._sendInterval = 1.5 * 1000; // 1.5 seconds between unsent message cycles
     this._sendTimer = null;
@@ -2638,6 +2644,7 @@ class LiveSession {
   }
 }
 
+/** 大厅维护公开房间列表，使用独立 WS；房间内游戏状态不通过此连接同步。 */
 class LiveLobby {
   constructor(store) {
     // 自建后端：大厅默认连同一来源，路径 /lobby/

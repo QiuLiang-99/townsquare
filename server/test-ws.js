@@ -1,21 +1,12 @@
 // WS 协议集成测试：模拟说书人(host) + 2名玩家 + 1个大厅客户端
-const WebSocket = require("ws");
+"use strict";
+const { createClients, frame, closed } = require("./test-helpers");
+const clients = createClients();
 const BASE = "ws://127.0.0.1:3000";
 const results = [];
 const ok = (name, cond, extra = "") => { results.push([name, !!cond, extra]); console.log(`${cond ? "PASS" : "FAIL"} ${name} ${extra}`); };
 
-function conn(url) {
-  if (url.includes("/ws/") && !url.includes("?")) url += "?auth=test-" + url.split("/").pop();
-  return new Promise((resolve, reject) => {
-    const ws = new WebSocket(url);
-    ws.msgs = [];
-    ws.on("message", (d) => {
-      try { ws.msgs.push(JSON.parse(d.toString())); } catch { ws.msgs.push(["RAW", d.toString()]); }
-    });
-    ws.on("open", () => resolve(ws));
-    ws.on("error", reject);
-  });
-}
+const conn = clients.connect;
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 const send = (ws, arr) => ws.send(JSON.stringify(arr));
 const lastOf = (ws, cmd) => [...ws.msgs].reverse().find((m) => m[0] === cmd);
@@ -38,10 +29,17 @@ const lastOf = (ws, cmd) => [...ws.msgs].reverse().find((m) => m[0] === cmd);
   await wait(100);
   ok("lobby 收到 addRoom", ((lobby.msgs.find((m) => m[0] === "addRoom") || [])[1] || {}).channel === CH);
 
-  // 4) 第二个 host 用不同 auth 连接 -> 应被拒(alertPopup+close)
+  // 4) 第二个 host 用不同 auth 连接 -> 应被拒(alertPopup+close 4009)
   const host2 = await conn(`${BASE}/ws/${CH}/hostpid2/host?auth=other`).catch(() => null);
-  await wait(150);
-  ok("重复host被拒(alertPopup)", host2 && (lastOf(host2, "alertPopup") || [])[1]);
+  if (host2) {
+    const alert = await frame(host2, "alertPopup");
+    ok("重复host被拒(alertPopup)", typeof alert === "string" && alert.length > 0);
+    const host2Close = await closed(host2);
+    ok("重复host连接被关闭(4009)", host2Close.code === 4009);
+  } else {
+    ok("重复host被拒(alertPopup)", false);
+    ok("重复host连接被关闭(4009)", false);
+  }
 
   // 5) 玩家1、玩家2 连接
   const p1 = await conn(`${BASE}/ws/${CH}/pid1`);
@@ -152,7 +150,10 @@ const lastOf = (ws, cmd) => [...ws.msgs].reverse().find((m) => m[0] === cmd);
   ok("离线目标明确报错", !!(lastOf(host, "quickWakeError")));
   send(p2, ["direct", { pid1: ["quickWakeIncoming", { id: "forged", content: "伪造" }] }]);
   await wait(100);
-  ok("普通 direct 不能绕过快捷唤醒校验", !!(lastOf(p2, "quickWakeError")));
+  const forgedError = [...p2.msgs].reverse().find(([cmd, payload]) =>
+    cmd === "quickWakeError" && payload && payload.id === "forged"
+  );
+  ok("普通 direct 不能绕过快捷唤醒校验", forgedError && forgedError[1].code === "forbidden");
   ok("伪造消息未到达目标玩家", !p1.msgs.some((m) => m[0] === "quickWakeIncoming" && m[1] && m[1].id === "forged"));
 
   // 15) 玩家发的广播（vote）应转发给 host 和其它玩家
@@ -166,30 +167,35 @@ const lastOf = (ws, cmd) => [...ws.msgs].reverse().find((m) => m[0] === cmd);
   await wait(150);
   ok("ping 收到 pong", !!lastOf(p1, "pong"));
 
-  // 17) request checkAllowJoin 到无 host 房间 -> false
+  // 17) 不存在的房间应拒绝加入，并正常完成拒绝后的关闭
   const p3 = await conn(`${BASE}/ws/888/pid9`);
-  await wait(100);
-  send(p3, ["request", { checkAllowJoin: ["pid9", null] }]);
-  await wait(100);
-  ok("空房间 checkAllowJoin=false", (lastOf(p3, "allowJoin") || [])[1] === false);
+  ok("不存在的房间 allowJoin=false", await frame(p3, "allowJoin") === false);
+  ok("不存在的房间连接被关闭", (await closed(p3)).code === 4004);
 
   // 18) bye 通知 host
   send(p2, ["bye", "pid2"]);
   await wait(100);
   ok("host 收到 bye", (lastOf(host, "bye") || [])[1] === "pid2");
 
-  // 19) 说书人离开后房间进入宽限期（不立即删除）——验证 room 仍在
-  p1.close(); host.close();
-  await wait(300);
-  ok("说书人离开后房间不被立即删除(宽限期)", true); // 语义变更：房间保留等待重连，避免"房间不存在"
+  // 19) bye 后重新加入，确保主动解散检查覆盖仍登记在房间内的两名玩家
+  p2.close();
+  await closed(p2);
+  const p2Again = await conn(`${BASE}/ws/${CH}/pid2`);
+  ok("主动离开后玩家可再次加入", await frame(p2Again, "allowJoin") === true);
 
-  // 20) 宽限期到期后 lobby 收到 removeRoom（需服务端以较短 ROOM_GRACE_MS 运行，如 500ms）
-  await wait(1000);
-  ok("宽限期后 lobby 收到 removeRoom(可选,依赖短grace)", true);
-
-  [lobby, host, p1, p3, host2].forEach((w) => { try { w && w.close(); } catch {} });
+  // 20) 主动解散不依赖服务端的 ROOM_GRACE_MS，必须真实关闭玩家并移除大厅房间
+  send(host, ["dissolveRoom", null]);
+  const [p1Close, p2Close, hostClose] = await Promise.all([closed(p1), closed(p2Again), closed(host)]);
+  ok("主动解散玩家均以1000正常关闭", p1Close.code === 1000 && p2Close.code === 1000);
+  ok("主动解散玩家收到解散原因", p1Close.reason.includes("解散") && p2Close.reason.includes("解散"));
+  ok("主动解散host以1000正常关闭", hostClose.code === 1000);
+  const removed = await frame(lobby, "removeRoom", (channel) => channel === CH);
+  ok("主动解散大厅收到removeRoom", removed === CH);
 
   const failed = results.filter((r) => !r[1]);
   console.log(`\n=== ${results.length - failed.length}/${results.length} passed ===`);
-  process.exit(failed.length ? 1 : 0);
-})().catch((e) => { console.error("TEST CRASH", e); process.exit(2); });
+  process.exitCode = failed.length ? 1 : 0;
+})().finally(() => clients.cleanup()).catch((e) => {
+  console.error("TEST CRASH", e);
+  process.exitCode = 1;
+});
