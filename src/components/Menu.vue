@@ -73,6 +73,7 @@
           <!-- Grimoire -->
           <li class="headline">魔典</li>
           <div class="options">
+            <li class="subhead">游戏操作</li>
             <li @click="toggleGrimoire" v-if="players.length">
               <template v-if="!grimoire.isPublic">隐藏</template>
               <template v-if="grimoire.isPublic">显示</template>
@@ -83,21 +84,16 @@
               <template v-if="grimoire.isNight">切换至白天</template>
               <em>[S]</em>
             </li>
-            <li @click="toggleModal('groupChat')" v-if="!session.isSpectator">
-              创建群聊（beta）
-              <em>[D]</em>
-            </li>
             <li @click="toggleIsReview" v-if="!session.isSpectator">
-              复盘视角
+              <template v-if="session.isReview">结束复盘</template>
+              <template v-else>复盘视角</template>
               <em>
                 <font-awesome-icon
-                  :icon="[
-                    'fas',
-                    session.isReview ? 'check-square' : 'square'
-                  ]"
+                  :icon="['fas', session.isReview ? 'ban' : 'eye']"
                 />
               </em>
             </li>
+            <li class="subhead">夜间工具</li>
             <li @click="toggleNightOrder" v-if="players.length">
               夜间顺序
               <em>
@@ -109,99 +105,17 @@
                 />
               </em>
             </li>
-            <li v-if="players.length">
-              缩放
-              <em>
-                <font-awesome-icon
-                  @click="setZoom(grimoire.zoom - 1)"
-                  icon="search-minus"
-                />
-                {{ Math.round(100 + grimoire.zoom * 10) }}%
-                <font-awesome-icon
-                  @click="setZoom(grimoire.zoom + 1)"
-                  icon="search-plus"
-                />
-              </em>
+            <li v-if="session.isSpectator && session.sessionId" @click="toggleModal('playerWake')">
+              快捷唤醒记录
+              <em><font-awesome-icon icon="bell" /></em>
             </li>
-            <li @click="setBackground">
-              背景图
-              <em><font-awesome-icon icon="image"/></em>
+            <li @click="toggleModal('nightWake')" v-if="players.length && !session.isSpectator">
+              夜间唤醒助手
+              <em><font-awesome-icon icon="cloud-moon" /></em>
             </li>
-            <li @click="$emit('trigger', ['uploadAvatar'])">
-              上传头像
-              <em><font-awesome-icon icon="user"/></em>
-            </li>
-            <li @click="changeName">
-              设置昵称
-              <em><font-awesome-icon icon="user-edit"/></em>
-            </li>
-            <li v-if="!edition.isOfficial" @click="imageOptIn">
-              <small>允许自定义图标</small>
-              <em
-                ><font-awesome-icon
-                  :icon="[
-                    'fas',
-                    grimoire.isImageOptIn ? 'check-square' : 'square'
-                  ]"
-              /></em>
-            </li>
-            <!-- <li v-if="!edition.isOfficial" @click="toggleForwardEvilInfo">
-              <small>提前邪恶互认和信息</small>
-              <em
-                ><font-awesome-icon
-                  :icon="[
-                    'fas',
-                    grimoire.isForwardEvilInfo ? 'check-square' : 'square'
-                  ]"
-              /></em>
-            </li> -->
-            <li @click="toggleStatic">
-              关闭动画
-              <em
-                ><font-awesome-icon
-                  :icon="['fas', grimoire.isStatic ? 'check-square' : 'square']"
-              /></em>
-            </li>
-            <li v-if="!session.isSpectator" @click="useOldOrderAsk">
-              使用原夜间顺序
-            </li>
-            <li v-if="!session.isSpectator" @click="useOldRoleAsk">
-              使用原角色能力
-            </li>
-            <li v-if="!!session.sessionId & session.isSpectator">
-              <div class="wrap">
-                <div @click="startEditingThreshold">
-                  <span>麦克风阈值</span>
-                  <span v-if="!isEditingThreshold">（{{ audioThresholdNumber }}）</span>
-                  <input v-else ref="audioInputNumber" type="number" v-model.number="audioThresholdNumber"
-                  class="input"
-                  @blur="stopEditingThreshold(false)"
-                  @keyup.esc="stopEditingThreshold(false)"
-                  @keyup.enter="stopEditingThreshold(true)"
-                  />
-                </div>
-                <input
-                  type="range"
-                  v-model.number="audioThresholdSlider"
-                  min="0"
-                  max="400"
-                  step="1"
-                  @input="syncAudioThresholdNumber(false)"
-                  @mouseup="syncAudioThresholdNumber(true)"
-                />
-              </div>
-            </li>
-            <li @click="toggleMuted">
-              静音
-              <em
-                ><font-awesome-icon
-                  :icon="['fas', grimoire.isMuted ? 'volume-mute' : 'volume-up']"
-              /></em>
-            </li>
-            <li @click="clearLocalStorage">
-              清空储存
-              <em
-                ><font-awesome-icon icon="trash-alt"/></em>
+            <li @click="toggleModal('quick')" v-if="!session.isSpectator">
+              快捷唤醒短语
+              <em><font-awesome-icon icon="comment-dots" /></em>
             </li>
           </div>
         </template>
@@ -228,21 +142,6 @@
                 复制链接
                 <em><font-awesome-icon icon="copy"/></em>
               </li>
-              <li v-if="!session.isSpectator" @click="distributeAsk">
-                发送角色
-                <em><font-awesome-icon icon="theater-masks"/></em>
-              </li>
-              <li v-if="!session.isSpectator" @click="distributeTypeAsk">
-                发送角色类型
-              </li>
-              <li v-if="!session.isSpectator" @click="distributeBluffsAsk">
-                发送伪装身份
-                <em><font-awesome-icon icon="hat-wizard"/></em>
-              </li>
-              <li v-if="!session.isSpectator" @click="distributeGrimoireAsk">
-                发送魔典
-                <em><font-awesome-icon icon="book"/></em>
-              </li>
               <li
                 v-if="session.voteHistory.length || !session.isSpectator"
                 @click="toggleModal('voteHistory')"
@@ -253,6 +152,41 @@
                 <span v-if="session.isSpectator">退出房间</span>
                 <span v-if="!session.isSpectator">解散房间</span>
                 <em>{{ session.sessionId }}</em>
+              </li>
+              <li class="subhead">通讯</li>
+              <li @click="toggleModal('groupChat')" v-if="!session.isSpectator">
+                创建群聊（beta）
+                <em>[D]</em>
+              </li>
+              <li v-if="!!session.sessionId && session.isSpectator">
+                <div class="wrap">
+                  <div @click="startEditingThreshold">
+                    <span>麦克风阈值</span>
+                    <span v-if="!isEditingThreshold">（{{ audioThresholdNumber }}）</span>
+                    <input v-else ref="audioInputNumber" type="number" v-model.number="audioThresholdNumber"
+                    class="input"
+                    @blur="stopEditingThreshold(false)"
+                    @keyup.esc="stopEditingThreshold(false)"
+                    @keyup.enter="stopEditingThreshold(true)"
+                    />
+                  </div>
+                  <input
+                    type="range"
+                    v-model.number="audioThresholdSlider"
+                    min="0"
+                    max="400"
+                    step="1"
+                    @input="syncAudioThresholdNumber(false)"
+                    @mouseup="syncAudioThresholdNumber(true)"
+                  />
+                </div>
+              </li>
+              <li @click="toggleMuted">
+                静音
+                <em
+                  ><font-awesome-icon
+                    :icon="['fas', grimoire.isMuted ? 'volume-mute' : 'volume-up']"
+                /></em>
               </li>
             </template>
           </div>
@@ -268,7 +202,7 @@
               <em><font-awesome-icon icon="dice"/></em>
             </li>
             <li @click="clearPlayers" v-if="players.length">
-              移除全部
+              移除全部座位
               <em><font-awesome-icon icon="trash-alt"/></em>
             </li> 
           </div>
@@ -278,6 +212,7 @@
           <!-- Characters -->
           <li class="headline">角色</li>
           <div class="options">
+            <li class="subhead">配置</li>
             <li v-if="!session.isSpectator" @click="toggleModal('edition')">
               选择剧本
               <em>[E]</em>
@@ -303,17 +238,39 @@
                 自定义私货商人
               </small>
             </li>
+            <li v-if="!session.isSpectator" @click="useOldOrderAsk">
+              使用原夜间顺序
+            </li>
+            <li v-if="!session.isSpectator" @click="useOldRoleAsk">
+              使用原角色能力
+            </li>
             <li @click="clearRoles" v-if="players.length">
-              移除全部
+              移除全部角色
               <em><font-awesome-icon icon="trash-alt"/></em>
             </li>
-          </div>
-        </template>
-
-        <template v-if="tab === 'help'">
-          <!-- Help -->
-          <li class="headline">帮助</li>
-          <div>
+            <template v-if="!session.isSpectator">
+              <li class="subhead">发送给玩家</li>
+              <li @click="distributeAsk">
+                发送角色
+                <em><font-awesome-icon icon="theater-masks"/></em>
+              </li>
+              <li @click="openBlindDraw">
+                盲抽角色
+                <em><font-awesome-icon icon="hand-paper"/></em>
+              </li>
+              <li @click="distributeTypeAsk">
+                发送角色类型
+              </li>
+              <li @click="distributeBluffsAsk">
+                发送伪装身份
+                <em><font-awesome-icon icon="hat-wizard"/></em>
+              </li>
+              <li @click="distributeGrimoireAsk">
+                发送魔典
+                <em><font-awesome-icon icon="book"/></em>
+              </li>
+            </template>
+            <li class="subhead">参考资料</li>
             <li @click="toggleModal('reference')">
               角色技能表
               <em>[R]</em>
@@ -322,15 +279,95 @@
               夜间顺序表
               <em>[N]</em>
             </li>
-            <li @click="toggleModal('quick')">
-              快捷唤醒短语
-              <em><font-awesome-icon icon="comment-dots" /></em>
+            <li
+              @click="downloadScriptImage"
+              :class="{ disabled: downloadingImage }"
+            >
+              下载剧本图
+              <em>
+                <font-awesome-icon
+                  :icon="['fas', downloadingImage ? 'spinner' : 'download']"
+                  :spin="downloadingImage"
+                />
+              </em>
             </li>
+            <li v-if="downloadMsg" class="download-hint">{{ downloadMsg }}</li>
+          </div>
+        </template>
+
+        <template v-if="tab === 'help'">
+          <!-- Help -->
+          <li class="headline">帮助</li>
+          <div>
+            <li class="subhead">显示与个性化</li>
+            <li v-if="players.length">
+              缩放
+              <em>
+                <font-awesome-icon
+                  @click="setZoom(grimoire.zoom - 1)"
+                  icon="search-minus"
+                />
+                {{ Math.round(100 + grimoire.zoom * 10) }}%
+                <font-awesome-icon
+                  @click="setZoom(grimoire.zoom + 1)"
+                  icon="search-plus"
+                />
+              </em>
+            </li>
+            <li @click="setBackground">
+              背景图
+              <em><font-awesome-icon icon="image"/></em>
+            </li>
+            <li @click="$emit('trigger', ['uploadAvatar'])">
+              上传头像
+              <em><font-awesome-icon icon="user"/></em>
+            </li>
+            <li @click="changeName">
+              设置昵称
+              <em><font-awesome-icon icon="user-edit"/></em>
+            </li>
+            <li @click="toggleStatic">
+              关闭动画
+              <em
+                ><font-awesome-icon
+                  :icon="['fas', grimoire.isStatic ? 'check-square' : 'square']"
+              /></em>
+            </li>
+            <li v-if="!edition.isOfficial" @click="imageOptIn">
+              <small>允许自定义图标</small>
+              <em
+                ><font-awesome-icon
+                  :icon="[
+                    'fas',
+                    grimoire.isImageOptIn ? 'check-square' : 'square'
+                  ]"
+              /></em>
+            </li>
+            <li @click="toggleForceWikiIcon">
+              <small>角色图标强制加载</small>
+              <em
+                ><font-awesome-icon
+                  :icon="[
+                    'fas',
+                    grimoire.forceWikiIcon ? 'check-square' : 'square'
+                  ]"
+              /></em>
+            </li>
+            <li @click="clearLocalStorage">
+              清空储存
+              <em
+                ><font-awesome-icon icon="trash-alt"/></em>
+            </li>
+            <li class="subhead">关于</li>
             <li>
               <a href="https://botcgrimoire.top/manual" target="_blank">使用说明参考</a>
             </li>
             <li @click="toggleModal('version')">
               更新日志
+            </li>
+            <li @click="showBuild = !showBuild" :title="'最后更新时间 ' + buildTimeText">
+              build {{ buildVersion }}
+              <em v-if="showBuild" class="build-time">{{ buildTimeText }}</em>
             </li>
             <li @click="toggleModal('gameState')">
               游戏状态JSON
@@ -496,9 +533,86 @@
 import { mapMutations, mapState } from "vuex";
 import { nextTick } from 'vue';
 
+// ---- 剧本图（7uuu 剧本库）相关工具 ----
+// 原站图片真实地址在预览清单里：assets/data/image-previews.js 的
+// window.ScriptImagePreviews.entries[`版本/文件名`] = { file: "<hash>.webp" }，
+// 实际图片 = assets/previews/<hash>.webp。清单按需加载一次。
+const PREVIEWS_MANIFEST = "https://7uuu.me/script_lib/assets/data/image-previews.js";
+const PREVIEWS_BASE = "https://7uuu.me/script_lib/assets/previews/";
+let previewsPromise = null;
+
+function loadImagePreviews() {
+  if (window.ScriptImagePreviews && window.ScriptImagePreviews.entries) {
+    return Promise.resolve(window.ScriptImagePreviews.entries);
+  }
+  if (!previewsPromise) {
+    previewsPromise = new Promise((resolve, reject) => {
+      const el = document.createElement("script");
+      el.src = PREVIEWS_MANIFEST + "?t=" + Date.now();
+      el.async = true;
+      el.onload = () => {
+        const entries = (window.ScriptImagePreviews || {}).entries;
+        if (entries) resolve(entries);
+        else reject(new Error("剧本图清单为空"));
+      };
+      el.onerror = () => reject(new Error("剧本图清单加载失败，请检查网络"));
+      document.head.appendChild(el);
+    }).catch(err => {
+      previewsPromise = null;
+      throw err;
+    });
+  }
+  return previewsPromise;
+}
+
+function previewURLOf(entries, version, fileName) {
+  if (!entries || !fileName) return "";
+  const direct = entries[`${version || ""}/${fileName}`];
+  if (direct && direct.file) return PREVIEWS_BASE + direct.file;
+  // 版本串对不上时，退化为按文件名匹配
+  const suffix = "/" + fileName;
+  for (const key of Object.keys(entries)) {
+    if (key.endsWith(suffix) && entries[key] && entries[key].file) {
+      return PREVIEWS_BASE + entries[key].file;
+    }
+  }
+  return "";
+}
+
+// 跨域图片无法用 <a download> 直接保存：先走本站代理，失败再试直连，最后新窗口打开。
+async function saveRemoteImage(url, fileName) {
+  let blob = null;
+  try {
+    const res = await fetch("/api/fetch-image?url=" + encodeURIComponent(url));
+    if (res.ok) blob = await res.blob();
+  } catch (e) {
+    // 忽略，走直连兜底
+  }
+  if (!blob) {
+    try {
+      const res = await fetch(url);
+      if (res.ok) blob = await res.blob();
+    } catch (e) {
+      // 被 CORS 挡，落到下面的兜底
+    }
+  }
+  if (!blob) {
+    window.open(url, "_blank", "noopener");
+    throw new Error("无法直接下载，已在新窗口打开图片，请右键另存为");
+  }
+  const objectURL = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectURL;
+  a.download = fileName;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(objectURL), 10000);
+}
+
 export default {
   computed: {
-    ...mapState(["grimoire", "session", "lobby", "edition", "channels", "selectedEditions"]),
+    ...mapState(["grimoire", "session", "lobby", "edition", "channels", "selectedEditions", "buildVersion", "roles"]),
     ...mapState("players", ["players"]),
     formattedTime() {
       const minutes = Math.floor(this.session.timer / 60);
@@ -520,11 +634,28 @@ export default {
       console.log(deviceType);
       if (/mobile|android|touch|webos|iphone|ipod/i.test(deviceType)) return true;
       return false;
+    },
+    // 当前剧本是否来自剧本库导入、且标注了剧本图（正面/背面）
+    canDownloadScriptImage() {
+      const ed = this.edition || {};
+      const fromLibrary = ed.libraryIndex !== undefined && ed.libraryIndex !== null;
+      return fromLibrary && !!(ed.libraryFront || ed.libraryBack);
+    },
+    // 构建时注入的最后更新时间（见 vue.config.js 的 __BUILD_TIME__），格式化成本地可读时间
+    buildTimeText() {
+      const raw = typeof __BUILD_TIME__ !== "undefined" ? __BUILD_TIME__ : "";
+      if (!raw) return "未知";
+      const d = new Date(raw);
+      if (isNaN(d.getTime())) return raw;
+      const pad = n => String(n).padStart(2, "0");
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ` +
+        `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
     }
   },
   data() {
     return {
       tab: "grimoire",
+      showBuild: false,
       timing: false,
       distributing: false,
       distributingBluffs: false,
@@ -554,6 +685,8 @@ export default {
         lycanthrope: false
       },
       recognition: null,
+      downloadingImage: false,
+      downloadMsg: "",
       microphoneSetting: "free",
       // 语音检测
       audioContext: null,
@@ -576,6 +709,37 @@ export default {
     }
   },
   methods: {
+    // 下载当前剧本的剧本图（角色表优先：背面是角色表，没有背面就用正面）
+    async downloadScriptImage() {
+      if (this.downloadingImage) return;
+      if (!this.canDownloadScriptImage) {
+        this.flashDownloadMsg("当前剧本不是从剧本库导入的，没有剧本图可下载");
+        return;
+      }
+      const ed = this.edition;
+      const file = ed.libraryBack || ed.libraryFront;
+      const label = ed.libraryBack ? "角色表" : "封面";
+      this.downloadingImage = true;
+      this.downloadMsg = "";
+      try {
+        const entries = await loadImagePreviews();
+        const url = previewURLOf(entries, ed.libraryVersion, file);
+        if (!url) throw new Error("没有找到这张剧本图的在线地址");
+        await saveRemoteImage(url, `${(ed.name || "剧本").trim()}-${label}.webp`);
+        this.flashDownloadMsg("已开始下载");
+      } catch (e) {
+        this.flashDownloadMsg(e && e.message ? e.message : "下载失败");
+      } finally {
+        this.downloadingImage = false;
+      }
+    },
+    flashDownloadMsg(msg) {
+      this.downloadMsg = msg;
+      clearTimeout(this._downloadMsgTimer);
+      this._downloadMsgTimer = setTimeout(() => {
+        this.downloadMsg = "";
+      }, 5000);
+    },
     async showInputModal({ inputType, inputModal, inputData }) {
       return new Promise((resolve, reject) => {
         this.$store.commit("session/setInputResolver", resolve);
@@ -682,6 +846,54 @@ export default {
       this.distributingGrimoire = false;
       this.distributingTypes = false;
       this.distributing = !this.distributing;
+    },
+    /**
+     * 盲抽角色：从「配置角色」已勾选的角色里构建牌堆（按 selected 数量展开，应用认知覆盖），
+     * 校验落座非旅行者人数 == 角色数量后开启盲抽窗口。
+     */
+    openBlindDraw() {
+      if (this.session.isSpectator) return;
+      // 收集所有已勾选角色：state.roles 是 Map，role.selected 即勾选数量
+      const allRoles = this.roles ? Array.from(this.roles.values()) : [];
+      // 认知覆盖：未上场但带 coverOf 的伪装牌，按 coverOf.id 建索引
+      const coverMap = {};
+      allRoles.forEach(role => {
+        if (role.coverOf && !role.selected) coverMap[String(role.coverOf.id)] = role;
+      });
+      const pool = [];
+      allRoles.forEach(role => {
+        const count = role.selected || 0;
+        if (!count) return;
+        const cover = coverMap[String(role.id)];
+        const card = cover
+          ? Object.assign({}, cover, {
+              selected: 1,
+              coverOf: { id: role.id, name: role.name, team: role.team, image: role.image || "" }
+            })
+          : role;
+        for (let i = 0; i < count; i++) pool.push(card);
+      });
+      const nonTravelers = this.players.filter(p => p.role && p.role.team !== "traveler").length;
+      if (pool.length === 0) {
+        this.$root.$emit("notify", "还没有配置角色，请先在「配置角色」里选好本局角色。", "err");
+        return;
+      }
+      if (pool.length !== nonTravelers) {
+        this.$root.$emit(
+          "notify",
+          `已配置 ${pool.length} 个角色，但落座的非旅行者玩家有 ${nonTravelers} 人，数量不一致，无法开始盲抽。`,
+          "err"
+        );
+        return;
+      }
+      // 打乱
+      const shuffled = pool
+        .map(a => [Math.random(), a])
+        .sort((a, b) => a[0] - b[0])
+        .map(a => a[1]);
+      this.$store.commit("session/setBlindDrawRoles", shuffled);
+      this.$store.commit("session/setBlindDrawActive", true);
+      this.toggleModal("blindDraw");
     },
     distributeRoles(confirm) {
       this.$nextTick(() => {
@@ -899,6 +1111,13 @@ export default {
         this.toggleImageOptIn();
       }
     },
+    // 「角色图标强制加载」：只对本地生效。开启时按需拉取 BWIKI 图床索引。
+    toggleForceWikiIcon() {
+      this.$store.commit("toggleForceWikiIcon");
+      if (this.grimoire.forceWikiIcon) {
+        this.$store.dispatch("ensureWikiIcons");
+      }
+    },
     async joinSession() {
       if (this.session.sessionId) return this.leaveSession();
       if (!this.session.playerName) await this.changeName();
@@ -1083,6 +1302,8 @@ export default {
         } else {
           this.$store.commit("players/clear", true)
         }
+        // 移除全部座位 = 新开一局：夜次回到第一夜
+        this.$store.commit("setDefaultNight");
       }
     },
     async clearRoles() {
@@ -1129,24 +1350,26 @@ export default {
       }
     },
     async toggleIsReview() {
-      if (this.isSpectator) return;
+      if (this.session.isSpectator) return;
 
-      const confirm = this.session.isReview ? false : await this.showInputModal({
+      if (this.session.isReview) {
+        // 结束复盘：恢复正常视角
+        this.$store.commit("session/setIsReview", false);
+        return;
+      }
+
+      const confirm = await this.showInputModal({
         inputType: "confirm",
         inputModal: "confirm",
         inputData: {
-          name: ["是否开启复盘视角？（所有玩家将看到角色）"]
+          name: ["是否开启复盘视角？（所有玩家将看到牌背，你点开某个座位后所有人可见其身份）"]
         }
       }).catch(() => {
         return null;
       });
-      if (confirm === null) return;
-
-      if (!this.session.isReview && confirm === true) {
-        this.$store.commit("session/setIsReview", !this.session.isReview);
+      if (confirm === true) {
+        this.$store.commit("session/setIsReview", true);
         this.$store.dispatch("players/realivePlayers");
-      } else if (this.session.isReview) {
-        this.$store.commit("session/setIsReview", false);
       }
     },
     useOldOrderAsk() {
@@ -1570,6 +1793,45 @@ export default {
         rgba(0, 0, 0, 0.5) 80%,
         $demon 100%
       );
+    }
+
+    .subhead {
+      cursor: default;
+      font-size: 75%;
+      letter-spacing: 1px;
+      opacity: 0.6;
+      padding: 6px 10px 2px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+      pointer-events: none;
+
+      &:hover {
+        color: inherit;
+      }
+    }
+
+    .build-time {
+      font-size: 80%;
+      opacity: 0.7;
+      padding-left: 6px;
+    }
+
+    // 「下载剧本图」的状态提示
+    .download-hint {
+      cursor: default;
+      font-size: 75%;
+      line-height: 1.35;
+      color: rgba(255, 255, 255, 0.7);
+      background: rgba(0, 0, 0, 0.5);
+      padding: 4px 8px;
+
+      &:hover {
+        color: rgba(255, 255, 255, 0.7);
+      }
+    }
+
+    li.disabled {
+      opacity: 0.5;
+      pointer-events: none;
     }
   }
 }

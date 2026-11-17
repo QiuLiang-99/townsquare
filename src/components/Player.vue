@@ -1,5 +1,5 @@
 <template>
-  <li :style="zoom">
+  <li :style="zoom" :class="{ revealed: isUnveiled }">
     <div
       ref="player"
       class="player"
@@ -10,13 +10,17 @@
           'no-vote': player.isVoteless,
           'vote-yes': session.votes[index],
           'vote-lock': voteLocked,
-          talking: player.isTalking && player.id
+          talking: player.isTalking && player.id,
+          revealed: isUnveiled
         },
         player.role.team
       ]"
     >
       <div class="seatNum">{{ players.indexOf(player) + 1 }}</div>
       <div class="newMessage" v-show="player.newMessages > 0">{{ player.newMessages }}</div>
+
+      <!-- 隐藏模式 / 复盘视角下的整座点击层：确保点座位任意位置都立即响应 -->
+      <div v-if="grimoire.isPublic || session.isReview" class="public-click-catcher" @click.stop="toggleStatus()"></div>
 
       <div class="shroud" @click="toggleStatus()"></div>
       <div class="life" @click="toggleStatus()"></div>
@@ -30,7 +34,10 @@
         class="night-order first"
         v-if="nightOrder.get(player).first && grimoire.isNightOrder"
       >
-        <em>{{ nightOrder.get(player).first }}.</em>
+        <em
+          :class="{ done: player.nightDone && player.nightDone['f' + grimoire.night] }"
+          :title="player.role.firstNightReminder || ''"
+        >{{ nightOrder.get(player).first }}.</em>
         <span v-if="player.role.firstNightReminder">{{
           player.role.firstNightReminder
         }}</span>
@@ -39,7 +46,10 @@
         class="night-order other"
         v-if="nightOrder.get(player).other && grimoire.isNightOrder"
       >
-        <em>{{ nightOrder.get(player).other }}.</em>
+        <em
+          :class="{ done: player.nightDone && player.nightDone['o' + grimoire.night] }"
+          :title="player.role.otherNightReminder || ''"
+        >{{ nightOrder.get(player).other }}.</em>
         <span v-if="player.role.otherNightReminder">{{
           player.role.otherNightReminder
         }}</span>
@@ -242,6 +252,13 @@
                 <font-awesome-icon icon="comment" prefix="fa"/>
               私聊
             </li>
+            <li
+              @click="openDirectedWake(player)"
+              :class="{ disabled: !player.id || player.id === 'host' || player.id === session.playerId }"
+            >
+              <font-awesome-icon icon="bell" prefix="fa"/>
+              快捷唤醒
+            </li>
           </template>
           <li
             @click="claimSeat"
@@ -271,15 +288,7 @@
       >
         <span
           class="icon"
-          :style="{
-            backgroundImage: `url(${
-              reminder.image && grimoire.isImageOptIn
-                ? reminder.image
-                : require('../assets/icons/' +
-                    (reminder.imageAlt || reminder.role.replace(/old1$/, '')) +
-                    '.png')
-            })`
-          }"
+          :style="{ backgroundImage: `url(${reminderIconUrl(reminder, grimoire, roles, iconStatusRev)})` }"
         ></span>
         <span class="text">{{ reminder.name }}</span>
       </div>
@@ -293,10 +302,14 @@
 
 <script>
 import Token from "./Token";
+import { sweepAndCommit, describeRemoved } from "../logic/reminders";
+import { reminderIconUrl } from "../logic/roleIcon";
+import iconMixin from "../logic/iconMixin";
 import { mapGetters, mapState } from "vuex";
 // import Vue from "vue";
 
 export default {
+  mixins: [iconMixin],
   components: {
     Token
   },
@@ -308,10 +321,20 @@ export default {
   },
   computed: {
     ...mapState("players", ["players"]),
-    ...mapState(["grimoire", "session"]),
+    ...mapState(["grimoire", "session", "roles"]),
     ...mapGetters({ nightOrder: "players/nightOrder" }),
     index: function() {
       return this.players.indexOf(this.player);
+    },
+    // 复盘视角下，本座位是否已被说书人点开揭示（所有端共享，来自 session.reviewRevealed）
+    reviewRevealed: function() {
+      return this.session.isReview &&
+        Array.isArray(this.session.reviewRevealed) &&
+        this.session.reviewRevealed.includes(this.index);
+    },
+    // 座位是否处于“翻开揭示”状态：隐藏模式用本地 revealed，复盘视角用共享 reviewRevealed
+    isUnveiled: function() {
+      return this.grimoire.isPublic ? this.revealed : this.reviewRevealed;
     },
     voteLocked: function() {
       const session = this.session;
@@ -365,7 +388,8 @@ export default {
       menuTop: null,
       menuHeight: null,
       menuNewTop: null,
-      votes: 0
+      votes: 0,
+      revealed: false
     };
   },
   mounted(){
@@ -390,9 +414,16 @@ export default {
           this.resize();
         })
       },
+    },
+    'grimoire.isPublic': {
+      handler(val) {
+        // 退出隐藏模式时，所有座位恢复默认（盖住）
+        if (!val) this.revealed = false;
+      }
     }
   },
   methods: {
+    reminderIconUrl,
     async showInputModal({ inputType, inputModal, inputData }) {
       return new Promise((resolve, reject) => {
         this.$store.commit("session/setInputResolver", resolve);
@@ -424,6 +455,11 @@ export default {
       return `translate(${iconShiftX}px, ${iconShiftY}px) scale(${scaleValue})`;
     },
     clickSetRole(){
+      // 隐藏模式：点击角色牌也用于翻转揭示/盖上该玩家角色
+      if (this.grimoire.isPublic) {
+        this.revealed = !this.revealed;
+        return;
+      }
       if (this.session.isSpectator && !this.player.id){
         this.claimSeat();
         return;
@@ -455,19 +491,15 @@ export default {
     },
     toggleStatus() {
       if (this.grimoire.isPublic) {
-        if (!this.player.isDead) {
-          this.updatePlayer("isDead", true);
-          if (this.player.isMarked) {
-            this.updatePlayer("isMarked", false);
-          }
-        } else if (this.player.isVoteless) {
-          this.updatePlayer("isVoteless", false);
-          this.updatePlayer("isDead", false);
-        } else {
-          this.updatePlayer("isVoteless", true);
-        }
+        // 隐藏模式：点击玩家 = 翻转揭示/盖上该玩家角色（不再切换生死/遗言票）
+        this.revealed = !this.revealed;
+      } else if (this.session.isReview) {
+        // 复盘视角：只有说书人能点开/收起；玩家端点击无效（只读）
+        if (this.session.isSpectator) return;
+        this.toggleReviewReveal();
       } else {
-        this.updatePlayer("isDead", !this.player.isDead);
+        const dying = !this.player.isDead;
+        this.updatePlayer("isDead", dying);
         if (this.player.isMarked) {
           this.updatePlayer("isMarked", false);
         }
@@ -478,7 +510,39 @@ export default {
           this.updatePlayer("isSecretVoteless", false);
           this.updatePlayer("isVoteless", false);
         }
+        // 死亡后，这个角色自己带来的标记就失效了（「干扰项」「保护」这类，
+        // 不管挂在自己身上还是别人身上都要摘掉）；复活不会自动放回
+        if (dying) this.dropRoleReminders();
       }
+    },
+    /**
+     * 把「该角色自己带来的、非全局」标记从全场摘掉，并弹可撤回提示条。
+     * 标记可能挂在别人座位上，所以必须扫全场。
+     */
+    dropRoleReminders() {
+      const role = this.player.role || {};
+      if (!role.id) return;
+      const groups = sweepAndCommit(this.$store, this.players, role);
+      if (!groups.length) return;
+      this.$root.$emit("undo-reminders", {
+        text: `${this.player.name} 已死亡，自动移除「${role.name}」带来的标记：${describeRemoved(
+          groups,
+          this.index
+        )}`,
+        groups
+      });
+    },
+    // 说书人切换到该座位是否被揭示（写共享状态，socket 插件会广播给全房间）
+    toggleReviewReveal() {
+      const idx = this.index;
+      const cur = Array.isArray(this.session.reviewRevealed) ? [...this.session.reviewRevealed] : [];
+      const pos = cur.indexOf(idx);
+      if (pos >= 0) {
+        cur.splice(pos, 1);
+      } else {
+        cur.push(idx);
+      }
+      this.$store.commit("session/setReviewRevealed", cur);
     },
     toggleVote() {
       if (!this.player.isDead) return;
@@ -639,6 +703,11 @@ export default {
       this.isMenuOpen = false;
       if (!player.id) return;
       this.$emit("trigger", ["openChat"]);
+    },
+    openDirectedWake(player) {
+      this.isMenuOpen = false;
+      if (!player.id || player.id === "host" || player.id === this.session.playerId) return;
+      this.$emit("trigger", ["openDirectedWake"]);
     },
     /**
      * Allow the ST to override a locked vote.
@@ -852,6 +921,109 @@ export default {
 
 #townsquare.public .circle .token {
   transform: perspective(400px) rotateY(-180deg);
+}
+
+/* 隐藏模式下：整座透明点击层，保证点座位任意位置都立即响应，且盖在角色牌之上 */
+#townsquare.public .player .public-click-catcher {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 20;
+  cursor: pointer;
+}
+
+/* 隐藏模式下，被点开(revealed)的座位：完全复制“非隐藏”状态的翻牌（token 正面、life 翻到背面），
+   即把该座位从 public 态单独还原，效果与点“显示”按钮一致；
+   注意：取消整盘翻转用的“按座位号递增的级联延迟”，单个揭示应立即翻转。 */
+#townsquare.public .player.revealed .token {
+  transform: perspective(400px) rotateY(0deg);
+  transition-delay: 0s !important;
+}
+#townsquare.public .player.revealed .life {
+  transform: perspective(400px) rotateY(180deg);
+  transition-delay: 0s !important;
+}
+
+/* unveiled 座位把微光遮罩掀开，露出完整角色牌 */
+#townsquare.public .player.revealed .shroud {
+  transform: perspective(400px) rotateX(0deg);
+  transition-delay: 0s !important;
+  pointer-events: none;
+}
+
+/* 被揭示的座位：角色身边的 reminder 小标记恢复显示（其它未揭示座位仍隐藏）；
+   保持 pointer-events:none —— 此模式为只读，禁止误触增删标记。
+   注意：reminder 是 <li> 的直接子元素（不在 .player 内），所以选择器用 li.revealed */
+#townsquare.public li.revealed .reminder:not(.add) {
+  opacity: 1;
+  pointer-events: none;
+}
+
+/* ===== 复盘视角 (review) =====
+   与“隐藏”按钮同样把全场牌盖住；但“翻开”不是各端本地操作，而是由说书人点开某个座位后
+   通过 session.reviewRevealed 同步给全房间，所有人一起看到该座位被翻开、身份被看清。
+   玩家端点击无效（见 Player.vue toggleStatus 的 isReview 分支）。
+   注意：牌背(life.png) 是 .life 元素，盖住时要把 .life 转到正面(0deg)、.token 转背面(-180deg)
+   与“隐藏”按钮完全一致；只翻 .token 会出现空图标。 */
+#townsquare.review .player .shroud {
+  transform: perspective(400px) rotateX(90deg);
+  pointer-events: none;
+}
+#townsquare.review .circle .token {
+  transform: perspective(400px) rotateY(-180deg);
+}
+#townsquare.review .player .life {
+  transform: perspective(400px) rotateY(0deg);
+}
+/* 旅行者处理与“隐藏”相同 */
+#townsquare.review .player.traveler:not(.dead) .token {
+  transform: perspective(400px) scale(0.8);
+  pointer-events: none;
+  transition-delay: 0s;
+}
+#townsquare.review .player.traveler.dead .token {
+  transition-delay: 0s;
+}
+/* 夜序提示标记：与“隐藏”按钮一致，复盘期间一律不显示（由 TownSquare.vue 隐藏），
+   即使座位被揭示也不显示夜序标记。 */
+#townsquare.review .player .public-click-catcher {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 20;
+  cursor: pointer;
+}
+/* 玩家端牌背不可点 */
+#townsquare.review.spectator .player .public-click-catcher {
+  cursor: default;
+}
+/* 被说书人点开(revealed)的座位：翻牌显示角色 */
+#townsquare.review .player.revealed .token {
+  transform: perspective(400px) rotateY(0deg);
+  transition-delay: 0s !important;
+}
+#townsquare.review .player.revealed .life {
+  transform: perspective(400px) rotateY(180deg);
+  transition-delay: 0s !important;
+}
+#townsquare.review .player.revealed .shroud {
+  transform: perspective(400px) rotateX(0deg);
+  transition-delay: 0s !important;
+  pointer-events: none;
+}
+/* 被揭示座位恢复显示夜序标记（盖住时由 TownSquare.vue 隐藏） */
+#townsquare.review li.revealed .reminder:not(.add) {
+  opacity: 1;
+  pointer-events: none;
+}
+/* reminder 在复盘模式未揭示时隐藏（仅显示已揭示的） */
+#townsquare.review .reminder {
+  opacity: 0;
+  pointer-events: none;
 }
 
 /****** Player choice icons *******/
@@ -1316,6 +1488,11 @@ li.move:not(.from) .player .overlay svg.move {
 .player.dead .night-order em {
   color: #ddd;
   background: linear-gradient(180deg, rgba(0, 0, 0, 1) 0%, gray 100%);
+}
+
+/* 说书人在「夜间唤醒助手」里点完成后，座位牌上的夜序数字变绿（照抄 botc 的处理） */
+.player .night-order em.done {
+  background: linear-gradient(180deg, rgba(0, 0, 0, 1) 0%, #2f9e55 100%);
 }
 
 /***** Reminder token *****/

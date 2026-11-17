@@ -1,6 +1,6 @@
 {
   "name": "townsquare",
-  "version": "3.3.1",
+  "version": "3.4.4",
   "description": "Blood on the Clocktower Town Square",
   "author": "limpy01",
   "scripts": {
@@ -8,7 +8,9 @@
     "build": "vue-cli-service build ./src/main.js",
     "lint": "vue-cli-service lint",
     "lint-ci": "eslint --no-fix --quiet --ext .js,.vue src scripts vue.config.js .eslintrc.js",
-    "check:server": "node --check server/index.js && node --check server/test-ws.js",
+    "test:quick-wake": "node server/test-quick-wake-unit.js && node server/test-quick-wake-state.js && node server/test-quick-wake-protocol.js",
+    "test:room-lifecycle": "node server/test-room-lifecycle.js",
+    "check:server": "node --check server/index.js && node --check server/test-ws.js && node --check server/test-helpers.js && node --check server/test-room-lifecycle.js && node --check server/test-quick-wake-unit.js && node --check server/test-quick-wake-state.js && node --check server/test-quick-wake-protocol.js",
     "postbuild": "node scripts/generate-sitemap.js"
   },
   "main": "App.vue",

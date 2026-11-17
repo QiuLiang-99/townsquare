@@ -4,6 +4,7 @@
     class="square"
     :class="{
       public: grimoire.isPublic,
+      review: session.isReview,
       spectator: session.isSpectator,
       vote: session.nomination
     }"
@@ -48,7 +49,8 @@
       </ul>
     </div>
 
-    <div class="fabled" :class="{ closed: !isFabledOpen }" v-if="fabled.length">
+    <div class="fabled" ref="fabledBox" :class="{ closed: !isFabledOpen }">
+      <template v-if="fabled.length">
       <h3>
         <span>传奇角色</span>
         <font-awesome-icon icon="times-circle" @click.stop="toggleFabled" />
@@ -86,14 +88,32 @@
           <Token :role="role"></Token>
         </li>
       </ul>
+      </template>
     </div>
-    <a v-if="!!session.sessionId && (!session.isSpectator || !!session.isHostAllowed || !!session.isJoinAllowed)"
-    href="https://botcgrimoire.top/donation/" target="_blank"
-    class="donation"
-    >
-      <span>支持</span>
-    </a>
+      <div
+        class="st-tokens"
+        v-if="!session.isSpectator"
+        :style="{ top: stTop + 'px', left: stLeft + 'px' }"
+      >
+        <div
+          class="reminder"
+          v-for="(token, index) in stTokens"
+          :key="'sttoken-' + index"
+          :class="[token.role]"
 
+          @click.stop="removeStToken(index)"
+        >
+          <span class="icon" :style="tokenStyle(token)"></span>
+          <span class="text">{{ token.name }}</span>
+        </div>
+        <div
+          class="reminder add"
+
+          @click.stop="openStTokenModal"
+        >
+          <span class="icon"></span>
+        </div>
+      </div>
     <div v-if="session.isSpectator && isRole.length > 0"
         class="is-role">
       <font-awesome-icon 
@@ -104,7 +124,7 @@
       />
     </div>
 
-    <ReminderModal :player-index="selectedPlayer"></ReminderModal>
+    <ReminderModal :player-index="selectedPlayer" :st-mode="stTokenMode"></ReminderModal>
     <RoleModal :player-index="selectedPlayer"></RoleModal>
 
     <div v-show="session.isChatOpen" :class="{chat: !isChatMin, chatMin: isChatMin}" :style="chatStyle">
@@ -146,9 +166,6 @@
         <span class="floating-text">{{ floatingNotice }}</span>
       </div>
     </div>
-    <div id="version">
-      <a href="https://beian.miit.gov.cn/" target="_blank">浙ICP备2024109577号-2</a>
-    </div>
     <div id="copyright">
       <span>
         Copyright &copy; 2020 bra1n
@@ -167,8 +184,11 @@ import Player from "./Player";
 import Token from "./Token";
 import ReminderModal from "./modals/ReminderModal";
 import RoleModal from "./modals/RoleModal";
+import { reminderIconUrl } from "../logic/roleIcon";
+import iconMixin from "../logic/iconMixin";
 
 export default {
+  mixins: [iconMixin],
   components: {
     Player,
     Token,
@@ -178,7 +198,7 @@ export default {
   computed: {
     ...mapGetters({ nightOrder: "players/nightOrder" }),
     ...mapState(["grimoire", "roles", "session"]),
-    ...mapState("players", ["players", "bluffs", "fabled"]),
+    ...mapState("players", ["players", "bluffs", "fabled", "stTokens"]),
     ...mapState(["floatingNotice"]),
     orientation: function(){
       const ratio = this.windowWidth / this.windowHeight;
@@ -242,6 +262,9 @@ export default {
   data() {
     return {
       selectedPlayer: 0,
+      stTokenMode: false,
+      stTop: 0,
+      stLeft: 10,
       bluffSize: 3,
       swap: -1,
       move: -1,
@@ -300,6 +323,11 @@ export default {
   },
   mounted(){
     window.addEventListener("resize", this.handleResize);
+    this.$nextTick(this.updateStTop);
+    setTimeout(this.updateStTop, 300);
+  },
+  updated(){
+    this.updateStTop();
   },
   beforeDestroy(){
     window.removeEventListener("resize", this.handleResize);
@@ -324,6 +352,50 @@ export default {
         this.$store.commit("players/setFabled", { index });
       }
     },
+    openStTokenModal() {
+      if (this.session.isSpectator) return;
+      this.stTokenMode = true;
+      this.selectedPlayer = null;
+      this.$store.commit("toggleModal", "reminder");
+    },
+    tokenStyle(token) {
+      const url =
+        reminderIconUrl(token, this.grimoire, this.roles, this.iconStatusRev) ||
+        require("../assets/icons/custom.png");
+      return { backgroundImage: "url(" + url + ")" };
+    },
+    updateStTop() {
+      const box = this.$refs.fabledBox;
+      if (!box || !this.$el || !this.$el.getBoundingClientRect) return;
+      const root = this.$el.getBoundingClientRect();
+      const rect = box.getBoundingClientRect();
+      const size = Math.round((window.innerHeight || 0) * 0.07);
+      const ratio = (this.windowWidth || window.innerWidth) / (this.windowHeight || window.innerHeight);
+      const portrait = ratio < 11 / 7;
+      const firstIcon = box.querySelector("ul > li");
+      const icon = firstIcon ? firstIcon.getBoundingClientRect() : null;
+      let left;
+      let top;
+      if (portrait) {
+        // 竖屏：传奇框内角色竖排，说书人标记放在框的右侧、横向排列
+        left = Math.round(rect.right - root.left + 8);
+        top = icon
+          ? Math.round(icon.top + icon.height / 2 - root.top - size / 2)
+          : Math.round(rect.top - root.top + 8);
+      } else {
+        // 宽屏：传奇框内角色横排，说书人标记放在框的下方、竖向排列
+        left = icon
+          ? Math.round(icon.left + icon.width / 2 - root.left - size / 2)
+          : Math.round(rect.left - root.left + 8);
+        top = Math.round(rect.bottom - root.top + 8);
+      }
+      if (Math.abs(top - this.stTop) > 1) this.stTop = top;
+      if (Math.abs(left - this.stLeft) > 1) this.stLeft = left;
+    },
+    removeStToken(index) {
+      if (this.session.isSpectator) return;
+      this.$store.commit("players/removeStToken", index);
+    },
     handleTrigger(playerIndex, [method, params]) {
       if (typeof this[method] === "function") {
         this[method](playerIndex, params);
@@ -343,6 +415,7 @@ export default {
       }
     },
     openReminderModal(playerIndex) {
+      this.stTokenMode = false;
       this.selectedPlayer = playerIndex;
       this.$store.commit("toggleModal", "reminder");
     },
@@ -498,6 +571,17 @@ export default {
       this.$nextTick(() => {
         this.scrollToBottom();
       });
+    },
+    openDirectedWake(playerIndex) {
+      if (this.session.isSpectator) return;
+      const player = this.players[playerIndex];
+      if (!player || !player.id || player.id === "host" || player.id === this.session.playerId) return;
+      this.$store.commit("quickWake/openTarget", {
+        playerId: player.id,
+        name: player.name,
+        seat: playerIndex + 1
+      });
+      this.$store.commit("toggleModal", "directedWake");
     },
     toggleChat(){
       if(this.isChatMin){
@@ -827,7 +911,7 @@ export default {
     svg.fa-plus-circle {
       display: block;
     }
-    ul li {
+    > ul:not(.st-tokens) li {
       width: 0;
       height: 0;
       .night-order {
@@ -840,94 +924,107 @@ export default {
   }
 }
 
-#townsquare > .donation {
+#townsquare > .st-tokens {
   position: absolute;
-  top: calc(50px + 16vh);
-  left: 10px;
-  height: 2rem;
-  width: 4rem;
-  z-index: 50;
-  text-decoration: none;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
 
-  // Outer border style
-  border: 2px solid #B67D43; /* A dark, textured border for the outer frame */
-  background-color: rgba(0, 0, 0, 1);
-  padding: 10px 20px;
-  color: inherit;
-  cursor: pointer;
+  .reminder {
+    background: url("../assets/reminder.png") center center;
+    background-size: 100%;
+    width: 7vh;
+    height: 7vh;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 2px;
+    border-radius: 50%;
+    border: 3px solid black;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    transition: all 200ms;
+    cursor: pointer;
 
-  span {
-    position: absolute;
-    top: 0.05rem;
-    left: 0.7rem;
-    white-space: nowrap;
-    font-size: 1.2rem;
+    .text {
+      line-height: 90%;
+      color: black;
+      font-size: 50%;
+      font-weight: bold;
+      text-align: center;
+      margin-top: 50%;
+      height: 100%;
+      width: 100%;
+      position: absolute;
+      top: 15%;
+      text-shadow: 0 1px 1px #f6dfbd, 0 -1px 1px #f6dfbd, 1px 0 1px #f6dfbd,
+        -1px 0 1px #f6dfbd;
+    }
+
+    .icon,
+    &:after {
+      content: " ";
+      position: absolute;
+      top: 0;
+      width: 90%;
+      height: 90%;
+      background-size: 100%;
+      background-position: center 0;
+      background-repeat: no-repeat;
+      background-image: url("../assets/icons/plus.png");
+      transition: opacity 200ms;
+    }
+
+    &:after {
+      background-image: url("../assets/icons/x.png");
+      opacity: 0;
+      top: 5%;
+    }
+
+    &.add {
+      opacity: 0.5;
+      top: 0;
+      &:after {
+        display: none;
+      }
+      .icon {
+        top: 5%;
+      }
+    }
+
+    &.custom {
+      .icon {
+        display: none;
+      }
+      .text {
+        font-size: 70%;
+        word-break: break-word;
+        margin-top: 0;
+        display: flex;
+        align-items: center;
+        align-content: center;
+        justify-content: center;
+        border-radius: 50%;
+        top: 0;
+      }
+    }
+
+    &:hover:before {
+      opacity: 0;
+    }
+    &:hover:after {
+      opacity: 1;
+    }
   }
-
-  box-shadow: 0 0 5px #B67D43; 
-  animation: glow-cycle 605s linear; /* 10m duration */
-  animation-delay: 1s;
 }
-// The keyframe animation for 10 minutes oscillation
-@keyframes glow-cycle {
-  0% { 
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-  
-  0.0826% { // Peak of the 1st pulse
-    box-shadow: 0 0 20px #DAB060;
-    border-color: #DAB060;
-  }
-  
-  0.165% { // End of the 1st pulse
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-  
-  0.247% { // Peak of the 2nd pulse
-    box-shadow: 0 0 20px #DAB060;
-    border-color: #DAB060;
-  }
-  
-  0.33% { // End of the 2nd pulse
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-  
-  0.413% { // Peak of the 3rd pulse
-    box-shadow: 0 0 20px #DAB060;
-    border-color: #DAB060;
-  }
-  
-  0.495% { // End of the 3rd pulse
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-  
-  0.578% { // Peak of the 4th pulse
-    box-shadow: 0 0 20px #DAB060;
-    border-color: #DAB060;
-  }
-  
-  0.66% { // End of the 4th pulse
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-
-  0.743% { // Peak of the 5th pulse
-    box-shadow: 0 0 20px #DAB060;
-    border-color: #DAB060;
-  }
-  
-  0.826% { // End of the 5th pulse, which is 5 seconds in
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
-  }
-  
-  100% { // The rest of the 10-minute duration is spent here
-    box-shadow: 0 0 5px #B67D43;
-    border-color: #B67D43;
+@media (max-aspect-ratio: 11/7) {
+  #townsquare > .st-tokens {
+    flex-direction: row;
+    flex-wrap: wrap;
+    max-width: 42vh;
   }
 }
 
@@ -977,6 +1074,11 @@ export default {
   }
 
   #townsquare.public & {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  #townsquare.review & {
     opacity: 0;
     pointer-events: none;
   }
@@ -1274,20 +1376,6 @@ export default {
 
 #townsquare:not(.spectator) .fabled ul li:hover .token:before {
   opacity: 1;
-}
-
-#version {
-    position: fixed;
-    bottom: 0;
-    right: 0;
-    background-color: transparent;
-    color: white;
-    padding: 0px;
-}
-
-#version a {
-    color: white;
-    text-decoration: none;
 }
 
 #copyright {
