@@ -2,7 +2,14 @@
   <Modal class="script-library" name="scriptLibrary" v-if="modals.scriptLibrary" @close="close">
     <div class="sl-head">
       <h3>剧本库</h3>
-      <span class="sl-sub">数据来自 7uuu.me 钟楼剧本库 · 共 {{ total }} 本</span>
+      <label class="sl-select sl-source">
+        <span class="sl-select-label">剧本库来源</span>
+        <select v-model="sourceLib" @change="onSourceChange">
+          <option value="group">群友</option>
+          <option value="yupi">鱼皮</option>
+        </select>
+      </label>
+      <span class="sl-sub">{{ sourceSub }}</span>
     </div>
 
     <!-- 搜索 -->
@@ -21,10 +28,11 @@
         class="sl-search-icon sl-loading"
       />
     </label>
-    <p class="sl-hint">空格分隔多个关键词 · #角色名 精确匹配</p>
+    <p class="sl-hint" v-if="sourceLib === 'group'">空格分隔多个关键词 · #角色名 精确匹配</p>
+    <p class="sl-hint" v-else>数据来自 ran.dogyupi.com 鱼皮剧本库 · 支持空格分隔多个关键词</p>
 
-    <!-- 快捷筛选 -->
-    <div class="sl-quick">
+    <!-- 快捷筛选（仅 7uuu 剧本库） -->
+    <div class="sl-quick" v-if="sourceLib === 'group'">
       <label class="sl-select sl-quick-status">
         <span class="sl-select-label">可用状态</span>
         <select v-model="availability">
@@ -71,8 +79,8 @@
       </label>
     </div>
 
-    <!-- 更多筛选 -->
-    <div class="sl-advanced" :class="{ open: more }">
+    <!-- 更多筛选（仅 7uuu 剧本库） -->
+    <div class="sl-advanced" :class="{ open: more }" v-if="sourceLib === 'group'">
       <button type="button" class="sl-adv-toggle" @click="more = !more">
         <span>更多筛选 <span class="sl-adv-hint">阵营、分类、人数</span></span>
         <span class="sl-adv-caret">{{ more ? "▴" : "▾" }}</span>
@@ -162,7 +170,7 @@
     <p v-if="error" class="sl-error">{{ error }}</p>
 
     <!-- 最近导入 -->
-    <div class="sl-recent" v-if="recent.length && !keyword && !category">
+    <div class="sl-recent" v-if="sourceLib === 'group' && recent.length && !keyword && !category">
       <span class="sl-filter-label">最近导入</span>
       <button
         v-for="r in recent"
@@ -177,13 +185,7 @@
     </div>
 
     <!-- 列表 -->
-    <p class="sl-count">
-      {{
-        loadingList
-          ? "加载中…"
-          : `命中 ${filtered.length} / ${total} 个剧本，已列出 ${visible.length} 个`
-      }}
-    </p>
+    <p class="sl-count">{{ countText }}</p>
 
     <ul class="sl-list" v-if="!loadingList || filtered.length">
       <li v-for="item in visible" :key="item.key">
@@ -260,10 +262,15 @@
       </li>
     </ul>
 
-    <div class="sl-more" v-if="visible.length < filtered.length">
+    <div class="sl-more" v-if="sourceLib === 'group' && visible.length < filtered.length">
       <button class="sl-more-btn" @click="loadMore">加载更多（{{ filtered.length - visible.length }}）</button>
     </div>
-    <p v-else-if="!loadingList && filtered.length === 0" class="sl-empty">
+    <div class="sl-more" v-if="sourceLib === 'yupi' && yupiItems.length < yupiTotal">
+      <button class="sl-more-btn" :disabled="yupiLoading" @click="loadMore">
+        {{ yupiLoading ? "加载中…" : `加载更多（剩余 ${yupiTotal - yupiItems.length}）` }}
+      </button>
+    </div>
+    <p v-else-if="!loadingList && !yupiLoading && filtered.length === 0" class="sl-empty">
       没有匹配的剧本
     </p>
 
@@ -375,6 +382,11 @@ export default {
     return {
       keyword: "",
       category: "",
+      // 剧本库来源：group = 7uuu.me（群友整理），yupi = ran.dogyupi.com（鱼皮）
+      sourceLib: "group",
+      yupiItems: [],
+      yupiTotal: 0,
+      yupiLoading: false,
       // 快捷筛选
       availability: "",
       quickPictures: false,
@@ -627,6 +639,26 @@ export default {
       return `${this.category} · 包含下级，共 ${node.count} 个剧本`;
     },
     filtered() {
+      // 鱼皮剧本库：服务端分页 + 关键词，客户端只再做收藏过滤
+      if (this.sourceLib === "yupi") {
+        const kwTerms = this.keyword
+          .trim()
+          .toLowerCase()
+          .split(/\s+/)
+          .filter(Boolean);
+        const favOnly =
+          this.quickFavorites || this.personal === "any" || this.personal === "favorite";
+        return this.yupiItems.filter(it => {
+          if (favOnly && !this.favorites[it.index]) return false;
+          if (
+            kwTerms.length &&
+            !kwTerms.every(term => it.searchText.indexOf(term) >= 0)
+          ) {
+            return false;
+          }
+          return true;
+        });
+      }
       const mn = parseInt(this.minc, 10);
       const mx = parseInt(this.maxc, 10);
       const setup = PLAYER_SETUPS[this.playerCount];
@@ -715,10 +747,25 @@ export default {
       return list;
     },
     visible() {
+      if (this.sourceLib === "yupi") return this.filtered;
       return this.filtered.slice(0, this.page * PAGE_SIZE);
     },
     total() {
-      return this.items.length;
+      return this.sourceLib === "yupi" ? this.yupiTotal : this.items.length;
+    },
+    sourceSub() {
+      return this.sourceLib === "yupi"
+        ? `数据来自 ran.dogyupi.com 鱼皮剧本库 · 共 ${this.yupiTotal} 本`
+        : `数据来自 7uuu.me 钟楼剧本库 · 共 ${this.total} 本`;
+    },
+    countText() {
+      if (this.sourceLib === "yupi") {
+        if (this.yupiLoading && !this.yupiItems.length) return "加载中…";
+        return `命中 ${this.filtered.length} 个剧本，已列出 ${this.filtered.length} 个（库中共 ${this.yupiTotal} 本）`;
+      }
+      return this.loadingList
+        ? "加载中…"
+        : `命中 ${this.filtered.length} / ${this.total} 个剧本，已列出 ${this.visible.length} 个`;
     },
     // 任一筛选条件变化 → 回到第 1 页
     filterSignature() {
@@ -780,6 +827,10 @@ export default {
     },
     onSearchInput() {
       this.page = 1;
+      if (this.sourceLib === "yupi") {
+        clearTimeout(this._yupiTimer);
+        this._yupiTimer = setTimeout(() => this.loadYupi(true), 350);
+      }
     },
     // 完整度状态中文（对应 7uuu pictureStateLabel）
     picStateLabel(state) {
@@ -840,7 +891,93 @@ export default {
       this.sort = key;
     },
     loadMore() {
+      if (this.sourceLib === "yupi") {
+        this.loadYupi(false);
+        return;
+      }
       this.page++;
+    },
+    // 切换剧本库来源
+    onSourceChange() {
+      this.error = "";
+      this.page = 1;
+      if (this.sourceLib === "yupi" && !this.yupiItems.length) {
+        this.loadYupi(true);
+      }
+    },
+    // 鱼皮剧本库：经本站 /api/dogyupi 代理转发（对方接口没有 CORS 头）
+    async yupiFetch(path) {
+      const res = await fetch("/api/dogyupi" + path);
+      if (!res.ok) {
+        throw new Error("接口返回 " + res.status);
+      }
+      return res.json();
+    },
+    // 鱼皮剧本条目 → 与 7uuu 列表一致的卡片结构
+    mapYupiItem(x) {
+      const category = [x.category, x.subcategory]
+        .filter(Boolean)
+        .join(" / ")
+        .replace(/^\/\s*/, "");
+      const logoDirect = x.logo || "";
+      return {
+        key: "yupi-" + x.id,
+        index: "yupi-" + x.id,
+        yupiId: x.id,
+        slug: x.slug,
+        name: x.name || "",
+        author: x.author || "",
+        category,
+        charCount: x.role_count || 0,
+        playerCount: x.role_count || 0,
+        teamCount: {},
+        roleNames: new Set(),
+        searchText: (
+          (x.name || "") +
+          " " +
+          (x.author || "") +
+          " " +
+          category
+        ).toLowerCase(),
+        type: "json",
+        url: "",
+        version: "",
+        logo: logoDirect
+          ? "/api/fetch-image?url=" + encodeURIComponent(logoDirect)
+          : "",
+        logoDirect,
+        health: "ready",
+        front: false,
+        back: false,
+        frontFile: "",
+        backFile: "",
+        imgTotal: 0,
+        picCount: 0,
+        picState: "complete",
+        pills: []
+      };
+    },
+    async loadYupi(reset) {
+      if (this.yupiLoading) return;
+      this.yupiLoading = true;
+      this.error = "";
+      const offset = reset ? 0 : this.yupiItems.length;
+      const params = new URLSearchParams({
+        limit: String(PAGE_SIZE),
+        offset: String(offset),
+        sort: "new"
+      });
+      const kw = this.keyword.trim();
+      if (kw) params.set("keyword", kw);
+      try {
+        const data = await this.yupiFetch("/api/scripts?" + params.toString());
+        const list = Array.isArray(data.items) ? data.items.map(x => this.mapYupiItem(x)) : [];
+        this.yupiItems = reset ? list : this.yupiItems.concat(list);
+        if (typeof data.total === "number") this.yupiTotal = data.total;
+      } catch (e) {
+        this.error = "鱼皮剧本库加载失败：" + (e && e.message ? e.message : e);
+      }
+      this.yupiLoading = false;
     },
     // 最近导入（localStorage 持久化）
     loadRecent() {
@@ -926,6 +1063,26 @@ export default {
     },
     async pickScript(item) {
       if (this.pickingKey) return;
+      // 鱼皮剧本库：走详情接口拿剧本 JSON
+      if (this.sourceLib === "yupi") {
+        this.pickingKey = item.key;
+        this.error = "";
+        try {
+          const data = await this.yupiFetch(
+            "/api/scripts/" + encodeURIComponent(item.slug)
+          );
+          const roles = data.payload || data.roles || data.script;
+          if (!roles) throw new Error("剧本内容为空");
+          this.applyScript(roles, null);
+          this.recordRecent(item);
+          this.pickingKey = "";
+          this.toggleModal("scriptLibrary");
+        } catch (e) {
+          this.pickingKey = "";
+          this.error = "导入失败：" + (e && e.message ? e.message : e);
+        }
+        return;
+      }
       // 仅外链（url 类型）：直接提示不支持（避免把别人的页面当 JSON）
       if (item.type === "url") {
         this.error = "这本剧本只提供外部链接，暂不支持直接导入。";
@@ -1083,6 +1240,21 @@ $border: rgba(0, 0, 0, 0.9);
   .sl-sub {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.45);
+  }
+  .sl-source {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.7);
+    select {
+      background: rgba(0, 0, 0, 0.4);
+      color: #eee;
+      border: 2px solid $border;
+      border-radius: 6px;
+      padding: 2px 6px;
+      font-size: 12px;
+    }
   }
 }
 
@@ -1408,7 +1580,7 @@ $border: rgba(0, 0, 0, 0.9);
 
 .sl-list {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 5px;
   list-style: none;
   margin: 0 0 10px;
@@ -1425,12 +1597,15 @@ $border: rgba(0, 0, 0, 0.9);
   }
   li {
     margin: 0;
+    min-width: 0;
   }
 }
 
 .sl-card {
   display: flex;
   width: 100%;
+  min-width: 0;
+  overflow: hidden;
   align-items: center;
   gap: 8px;
   border: 2px solid $border;
@@ -1473,9 +1648,12 @@ $border: rgba(0, 0, 0, 0.9);
   align-items: center;
   gap: 6px;
   min-width: 0;
+  overflow: hidden;
 }
 
 .sl-name {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 14px;
   color: #f7e3a8;
   white-space: nowrap;

@@ -404,6 +404,9 @@ const IMAGE_PROXY_HOSTS = [
   "patchwiki.biligame.com",
   "i.postimg.cc",
   "i0.hdslb.com",
+  // 鱼皮剧本库（ran.dogyupi.com）的剧本 logo 图床
+  "youke1.picui.cn",
+  "pic.code-nav.cn",
 ];
 // 按源站给出合适的 Referer，绕开图床的防盗链
 const IMAGE_PROXY_REFERER = {
@@ -412,6 +415,8 @@ const IMAGE_PROXY_REFERER = {
   "patchwiki.biligame.com": "https://wiki.biligame.com/jbzlbwgwjcygf/",
   "i.postimg.cc": "https://7uuu.me/",
   "i0.hdslb.com": "https://www.bilibili.com/",
+  "youke1.picui.cn": "https://ran.dogyupi.com/",
+  "pic.code-nav.cn": "https://ran.dogyupi.com/",
 };
 const IMAGE_PROXY_MAX_BYTES = 20 * 1024 * 1024;
 // 内存缓存：列表缩略图一次会请求几十张，缓存后翻页/重开弹窗就不再打上游
@@ -536,6 +541,52 @@ app.get("/api/wiki-icons", async (req, res) => {
   } catch (e) {
     log("wiki-icons error", e.stack || e.message);
     return res.status(502).json({ status: "error", message: "wiki fetch failed" });
+  }
+});
+
+// 鱼皮剧本库（ran.dogyupi.com）接口代理
+// 对方 API（apiran.dogyupi.com）没有 CORS 响应头，浏览器里直接 fetch 会被拦，
+// 这里做一个只读转发：只允许 /api/ 下的路径，避免变成任意 URL 代理。
+const DOGYUPI_BASE = "https://apiran.dogyupi.com";
+const DOGYUPI_CACHE_TTL = 3 * 60 * 1000;
+const DOGYUPI_CACHE_MAX = 120;
+const dogyupiCache = new Map(); // href -> { body, at }
+
+app.get("/api/dogyupi/*", async (req, res) => {
+  try {
+    const sub = req.params[0] || "";
+    if (!/^api\//.test(sub)) {
+      return res.status(403).json({ status: "error", message: "path not allowed" });
+    }
+    const qs = req.originalUrl.split("?")[1] || "";
+    const href = DOGYUPI_BASE + "/" + sub + (qs ? "?" + qs : "");
+    const cached = dogyupiCache.get(href);
+    if (cached && Date.now() - cached.at < DOGYUPI_CACHE_TTL) {
+      res.setHeader("Content-Type", "application/json; charset=utf-8");
+      res.setHeader("X-Cache", "HIT");
+      return res.end(cached.body);
+    }
+    const upstream = await fetch(href, {
+      headers: {
+        accept: "application/json",
+        referer: "https://ran.dogyupi.com/scripts",
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+      },
+      redirect: "follow",
+    });
+    if (!upstream.ok) {
+      return res.status(502).json({ status: "error", message: `upstream ${upstream.status}` });
+    }
+    const body = await upstream.text();
+    if (dogyupiCache.size >= DOGYUPI_CACHE_MAX) dogyupiCache.clear();
+    dogyupiCache.set(href, { body, at: Date.now() });
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.setHeader("Cache-Control", "public, max-age=60");
+    return res.end(body);
+  } catch (e) {
+    log("dogyupi proxy error", e.stack || e.message);
+    return res.status(502).json({ status: "error", message: "proxy failed" });
   }
 });
 
