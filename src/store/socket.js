@@ -425,6 +425,12 @@ class LiveSession {
         this._updateSeat(params);
         this._createChatHistory(params);
         break;
+      case "avatar":
+        this._updateAvatar(params);
+        break;
+      case "name":
+        this._updatePlayerName(params);
+        break;
       case "leaveSeat":
         this._updateLeaveSeat();
         break;
@@ -1448,7 +1454,8 @@ class LiveSession {
    */
   async _avatarReceived(link) {
     const playerId = this._store.state.session.playerId;
-    const linkId = link.split(".")[0];
+    // link 形如 "/avatars/<playerId>.webp"（也可能是裸文件名），取最后一段再取扩展名前部分
+    const linkId = String(link || "").split("/").pop().split(".")[0];
     if (playerId != linkId) return;
 
     this._store.commit("session/updatePlayerAvatar", link);
@@ -1524,6 +1531,34 @@ class LiveSession {
    * Seats already occupied can't be claimed.
    * @param seat either -1 to vacate or the index of the seat claimed
    */
+  /**
+   * 上传头像成功/更新后，若自己正坐在座位上，把新头像直连告知说书人，
+   * 由说书人更新座位 image 并广播，避免"上传成功但座位上头像不变"。
+   * @param {string} link 头像地址（/avatars/xxx.webp）
+   */
+  _sendAvatarToHost(link) {
+    if (!this._isSpectator) return; // 只有玩家端需要上报
+    if (!link) return;
+    const session = this._store.state.session;
+    if (session.claimedSeat < 0) return; // 没坐下就不需要更新座位
+    if (!session.playerId) return;
+    this._sendDirect("host", "avatar", [session.playerId, link]);
+  }
+
+  /**
+   * 改昵称后若自己正坐在座位上，把新昵称直连告知说书人，由说书人更新座位并广播，
+   * 避免"改了昵称但座位上还是旧名字"或要等下一次全量同步才生效。
+   * @param {string} name
+   */
+  _sendPlayerNameToHost(name) {
+    if (!this._isSpectator) return;
+    if (!name) return;
+    const session = this._store.state.session;
+    if (session.claimedSeat < 0) return;
+    if (!session.playerId) return;
+    this._sendDirect("host", "name", [session.playerId, name]);
+  }
+
   claimSeat(seat) {
     if (!this._isSpectator) return;
     const players = this._store.state.players.players;
@@ -1539,8 +1574,43 @@ class LiveSession {
    * @param value playerId to add / remove
    * @private
    */
-  _updateSeat([index, value, name, image]) {
-    // index is the seat number, value is the playerId, name is the playerName
+  /**
+   * 说书人收到玩家「换了头像」的直连消息：把该玩家所在座位的 image 更新为新头像。
+   * 提交 players/update 后由 store 订阅器自动广播 "player" 帧给全房间，各端头像随即刷新。
+   * @param {[string, string]} params [playerId, image]
+   */
+  _updateAvatar([playerId, image]) {
+    if (this._isSpectator) return;
+    if (!playerId || !image) return;
+    const players = this._store.state.players.players;
+    const index = players.findIndex(player => player.id === playerId);
+    if (index < 0) return;
+    this._store.commit("players/update", {
+      player: players[index],
+      property: "image",
+      value: image
+    });
+  }
+
+  /**
+   * 说书人收到玩家「改了昵称」的直连消息：更新该玩家所在座位的 name。
+   * 提交 players/update 后由 store 订阅器广播 "player" 帧，全房间立即看到新名字。
+   * @param {[string, string]} params [playerId, name]
+   */
+  _updatePlayerName([playerId, name]) {
+    if (this._isSpectator) return;
+    if (!playerId || !name) return;
+    const players = this._store.state.players.players;
+    const index = players.findIndex(player => player.id === playerId);
+    if (index < 0) return;
+    this._store.commit("players/update", {
+      player: players[index],
+      property: "name",
+      value: name
+    });
+  }
+
+  _updateSeat([index, value, name, image]) {    // index is the seat number, value is the playerId, name is the playerName
     if (this._isSpectator) return;
     // const property = "id";
     const players = this._store.state.players.players;
@@ -2883,11 +2953,16 @@ export default store => {
         session._sendRoomMeta();
         break;
       case "session/setPlayerName":
-        // 说书人改昵称 → 同步说书人名称到大厅
+        // 说书人改昵称 → 同步说书人名称到大厅；玩家改昵称 → 同步到自己座位
         if (session._isHost && state.session.sessionId) session._sendRoomMeta();
+        session._sendPlayerNameToHost(payload);
         break;
       case "session/claimSeat":
         session.claimSeat(payload);
+        break;
+      case "session/updatePlayerAvatar":
+        // 头像变更（上传成功 / 服务端回执）→ 若已入座则告知说书人刷新座位头像
+        session._sendAvatarToHost(payload);
         break;
       case "session/distributeRoles":
         if (payload) {

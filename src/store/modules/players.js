@@ -1,4 +1,5 @@
 import Vue from "vue";
+import { avatarUrl } from "../../logic/avatar";
 
 const NEWPLAYER = {
   name: "",
@@ -256,7 +257,7 @@ const mutations = {
     } else if (fabled) {
       const fabledStoryteller = {
         "id": "storyteller",
-        "image": "/avatars/" + stImage,
+        "image": avatarUrl(stImage),
         "firstNightReminder": "",
         "otherNightReminder": "",
         "reminders": [],

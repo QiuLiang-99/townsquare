@@ -25,8 +25,9 @@
       <div class="shroud" @click="toggleStatus()"></div>
       <div class="life" @click="toggleStatus()"></div>
       <div v-if="player.id" class="avatar">
-        <img :src="`/avatars/${player.image}`" 
+        <img :src="avatarUrl(player.image)"
           :class="{ on: player.role.id }"
+          @error="onAvatarError"
         >
       </div>
 
@@ -304,6 +305,7 @@
 import Token from "./Token";
 import { sweepAndCommit, describeRemoved } from "../logic/reminders";
 import { reminderIconUrl } from "../logic/roleIcon";
+import { avatarUrl } from "../logic/avatar";
 import iconMixin from "../logic/iconMixin";
 import { mapGetters, mapState } from "vuex";
 // import Vue from "vue";
@@ -424,6 +426,14 @@ export default {
   },
   methods: {
     reminderIconUrl,
+    avatarUrl,
+    // 头像 404 时退回默认头像（只回退一次，避免死循环）
+    onAvatarError(event) {
+      const img = event && event.target;
+      if (!img || img.dataset.avatarFallback) return;
+      img.dataset.avatarFallback = "1";
+      img.src = avatarUrl("");
+    },
     async showInputModal({ inputType, inputModal, inputData }) {
       return new Promise((resolve, reject) => {
         this.$store.commit("session/setInputResolver", resolve);
