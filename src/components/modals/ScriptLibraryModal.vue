@@ -197,7 +197,7 @@
             class="sl-logo"
             :src="item.logo || defaultLogo"
             alt=""
-            loading="lazy"
+            loading="eager"
             @error="onLogoError(item)"
           />
           <span class="sl-info">
@@ -223,7 +223,9 @@
             <span class="sl-meta">
               <span v-if="item.author">{{ item.author }}</span>
               <span>{{ item.charCount }} 个角色</span>
-              <span class="sl-ver">{{ item.version }}</span>
+              <span v-if="item.category" class="sl-ver sl-cat" :title="item.category">{{
+                item.category
+              }}</span>
             </span>
             <span class="sl-pills">
               <span
@@ -280,7 +282,33 @@ import { mapState, mapMutations } from "vuex";
 // 7uuu.me 钟楼剧本库：静态资源地址（数据实时来自对方服务器，不落本地）
 const CATALOG_URL = "https://7uuu.me/script_lib/assets/data/catalog.js";
 const FULL_URL = "https://7uuu.me/script_lib/assets/scripts-full.js";
+// 剧本图片的压缩预览清单（key = 版本/文件名，value = {file:"<24位hex>.webp"}）。
+// 原站列表缩略图就是从这里取 —— 原图库有防盗链，预览图才可直接显示。
+const PREVIEWS_MANIFEST_URL = "https://7uuu.me/script_lib/assets/data/image-previews.js";
+const PREVIEWS_BASE = "https://7uuu.me/script_lib/assets/previews/";
 const PAGE_SIZE = 30;
+
+// 懒加载预览清单（整个页面只注入一次）
+let previewsPromise = null;
+function loadPreviewsManifest() {
+  if (window.ScriptImagePreviews && window.ScriptImagePreviews.entries) {
+    return Promise.resolve(window.ScriptImagePreviews);
+  }
+  if (previewsPromise) return previewsPromise;
+  previewsPromise = new Promise((resolve, reject) => {
+    const el = document.createElement("script");
+    el.src = PREVIEWS_MANIFEST_URL + "?t=" + Date.now();
+    el.async = true;
+    el.dataset.tslib = "previews";
+    el.onload = () => resolve(window.ScriptImagePreviews || { entries: {} });
+    el.onerror = () => {
+      previewsPromise = null;
+      reject(new Error("剧本缩略图清单加载失败"));
+    };
+    document.head.appendChild(el);
+  });
+  return previewsPromise;
+}
 
 // 7uuu SCRIPTS 每项字段下标（见 catalog.js 结构）：
 // 0 名称 1 作者 2 分类路径 3 磁盘相对路径 4 人数 5 角色id下标数组
@@ -424,6 +452,30 @@ export default {
           : imgTotal
           ? "ancillary"
           : "missing-images";
+        // 列表缩略图：照抄原站 —— 从预览清单里按 front → back → logo → 其它图片 取第一张可用的
+        // 原图库有防盗链，这里改用对方的压缩预览图（webp）；走本站代理再保险一层，
+        // 失败时 onLogoError 会退回直连地址。没有可用图时模板显示占位图标。
+        const previewEntries =
+          (window.ScriptImagePreviews && window.ScriptImagePreviews.entries) || null;
+        let logo = "";
+        let logoDirect = "";
+        if (previewEntries) {
+          const verKey = String(s[F_VERSION] || "").replace(/\\/g, "/");
+          const candidates = [sides.front, sides.back, sides.logo, ...files];
+          const used = new Set();
+          for (const file of candidates) {
+            if (!file || used.has(file)) continue;
+            used.add(file);
+            const entry =
+              previewEntries[verKey + "/" + file] ||
+              previewEntries[s[F_VERSION] + "/" + file];
+            if (entry && entry.file) {
+              logoDirect = PREVIEWS_BASE + entry.file;
+              logo = "/api/fetch-image?url=" + encodeURIComponent(logoDirect);
+              break;
+            }
+          }
+        }
         // 角色统计与名称（排除 jinx / token 之类规则条目）
         const roster = Array.isArray(s[F_ROSTER]) ? s[F_ROSTER] : [];
         const teamCount = {};
@@ -480,7 +532,8 @@ export default {
           type,
           url: s[F_URL] || "",
           version: s[F_VERSION] || "",
-          logo: "",
+          logo,
+          logoDirect,
           health,
           front,
           back,
@@ -686,7 +739,16 @@ export default {
       ]);
     },
     defaultLogo() {
-      return "";
+      // 没有可用缩略图时的占位图（与 7uuu 的“资料”占位一致的简易文档图标）
+      return (
+        "data:image/svg+xml;charset=utf-8," +
+        encodeURIComponent(
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 38">' +
+            '<path d="M8 3h11l7 7v24H6V3h2Zm11 0v8h7" fill="none" stroke="#8a8a8a" stroke-width="1.6"/>' +
+            '<path d="M11 17h10M11 22h10M11 27h6" stroke="#8a8a8a" stroke-width="1.6" fill="none"/>' +
+            "</svg>"
+        )
+      );
     }
   },
   watch: {
@@ -697,6 +759,14 @@ export default {
   created() {
     this.loadRecent();
     this.loadFavorites();
+    // 缩略图清单（原站列表左侧预览图的数据源）
+    loadPreviewsManifest()
+      .then(() => {
+        this.version++;
+      })
+      .catch(() => {
+        /* 缩略图加载失败不影响列表本身，显示占位图 */
+      });
     if (!window.SCRIPTS) {
       this.loadCatalog();
     } else {
@@ -802,7 +872,12 @@ export default {
       if (item) this.pickScript(item);
     },
     onLogoError(item) {
-      item.logo = "";
+      // 代理失败 → 试直连预览图；直连也失败 → 空，模板显示占位图
+      if (item.logoDirect && item.logo !== item.logoDirect) {
+        item.logo = item.logoDirect;
+      } else {
+        item.logo = "";
+      }
     },
     // 用 <script> 注入加载 7uuu 的 catalog.js（不受 CORS 限制）
     loadCatalog() {
@@ -1377,11 +1452,11 @@ $border: rgba(0, 0, 0, 0.9);
 }
 
 .sl-logo {
-  width: 32px;
-  height: 32px;
+  width: 52px;
+  height: 72px;
   flex: none;
   border-radius: 4px;
-  object-fit: contain;
+  object-fit: cover;
   background: rgba(255, 255, 255, 0.06);
 }
 
@@ -1442,6 +1517,10 @@ $border: rgba(0, 0, 0, 0.9);
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 60%;
+  }
+  .sl-cat {
+    max-width: 100%;
+    flex: 1 1 100%;
   }
 }
 

@@ -396,8 +396,27 @@ app.post("/upload/avatar", (req, res) => {
 // 剧本图代理下载
 // 7uuu.me 的剧本图没有 CORS 头，浏览器里 fetch 拿不到 blob，无法触发「另存为」。
 // 这里做一个受限的反向代理：只允许剧本图所在域名，避免变成任意 URL 代理。
-const IMAGE_PROXY_HOSTS = ["7uuu.me", "www.7uuu.me"];
+const IMAGE_PROXY_HOSTS = [
+  "7uuu.me",
+  "www.7uuu.me",
+  // 剧本 JSON 里 _meta.logo 可能指向的图床
+  "patchwiki.biligame.com",
+  "i.postimg.cc",
+  "i0.hdslb.com",
+];
+// 按源站给出合适的 Referer，绕开图床的防盗链
+const IMAGE_PROXY_REFERER = {
+  "7uuu.me": "https://7uuu.me/script_lib/",
+  "www.7uuu.me": "https://7uuu.me/script_lib/",
+  "patchwiki.biligame.com": "https://wiki.biligame.com/jbzlbwgwjcygf/",
+  "i.postimg.cc": "https://7uuu.me/",
+  "i0.hdslb.com": "https://www.bilibili.com/",
+};
 const IMAGE_PROXY_MAX_BYTES = 20 * 1024 * 1024;
+// 内存缓存：列表缩略图一次会请求几十张，缓存后翻页/重开弹窗就不再打上游
+const IMAGE_PROXY_CACHE_TTL = 24 * 60 * 60 * 1000;
+const IMAGE_PROXY_CACHE_MAX = 400;
+const imageProxyCache = new Map(); // url -> { buf, type, at }
 
 app.get("/api/fetch-image", async (req, res) => {
   try {
@@ -411,8 +430,21 @@ app.get("/api/fetch-image", async (req, res) => {
     if (target.protocol !== "https:" || !IMAGE_PROXY_HOSTS.includes(target.hostname)) {
       return res.status(403).json({ status: "error", message: "host not allowed" });
     }
+    const cacheKey = target.href;
+    const cached = imageProxyCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < IMAGE_PROXY_CACHE_TTL) {
+      res.setHeader("Content-Type", cached.type);
+      res.setHeader("Content-Length", String(cached.buf.length));
+      res.setHeader("Cache-Control", "public, max-age=86400");
+      res.setHeader("X-Cache", "HIT");
+      return res.end(cached.buf);
+    }
     const upstream = await fetch(target.href, {
-      headers: { referer: "https://7uuu.me/script_lib/", "user-agent": "townsquare-image-proxy" },
+      headers: {
+        referer: IMAGE_PROXY_REFERER[target.hostname] || "https://7uuu.me/script_lib/",
+        "user-agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+      },
       redirect: "follow",
     });
     if (!upstream.ok) {
@@ -426,9 +458,15 @@ app.get("/api/fetch-image", async (req, res) => {
     if (buf.length > IMAGE_PROXY_MAX_BYTES) {
       return res.status(413).json({ status: "error", message: "image too large" });
     }
+    if (imageProxyCache.size >= IMAGE_PROXY_CACHE_MAX) {
+      const oldest = imageProxyCache.keys().next().value;
+      if (oldest !== undefined) imageProxyCache.delete(oldest);
+    }
+    imageProxyCache.set(cacheKey, { buf, type, at: Date.now() });
     res.setHeader("Content-Type", type);
     res.setHeader("Content-Length", String(buf.length));
     res.setHeader("Cache-Control", "public, max-age=86400");
+    res.setHeader("X-Cache", "MISS");
     return res.end(buf);
   } catch (e) {
     log("fetch-image error", e.stack || e.message);
