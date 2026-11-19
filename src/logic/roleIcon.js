@@ -93,6 +93,97 @@ function lookupWiki(map, role) {
   return best ? map[best] : "";
 }
 
+// ---------------------------------------------------------------------------
+// 7uuu.me 统一图床（script_tool/hosted-icons）
+//
+// 数据来自 https://7uuu.me/script_tool/assets/script-tool/data.js 里的全局变量
+// HOSTED_ROLE_ICONS（约 595 条，键 = 角色 id，值 = hosted-icons 直链）。
+// 该文件是普通 JS，用 <script> 引入即可读到全局变量（不受 CORS 限制），
+// 图床本身也不校验 Referer，因此不需要任何服务端代理。
+// ---------------------------------------------------------------------------
+
+const HOSTED_ICONS_SRC = "https://7uuu.me/script_tool/assets/script-tool/data.js";
+
+let hostedPromise = null;
+const hostedByKey = new Map(); // 归一化后的角色 id -> 直链
+
+// 同一角色在两边可能只是书写方式不同：7uuu 用 `fortune_teller_gstone` / `lil_monsta_gstone`，
+// 我们用 `fortuneteller` / `lilmonstaold1`。这里只做「拼写归一化」判等，不做模糊匹配。
+function normalizeRoleId(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/_gstone$/, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function buildHostedIndex(raw) {
+  hostedByKey.clear();
+  Object.keys(raw || {}).forEach(key => {
+    const url = raw[key];
+    if (!url) return;
+    const normalized = normalizeRoleId(key);
+    if (normalized && !hostedByKey.has(normalized)) {
+      hostedByKey.set(normalized, url);
+    }
+  });
+}
+
+function notifyIconStatus() {
+  statusListeners.forEach(listener => {
+    try {
+      listener();
+    } catch (e) {
+      /* 单个订阅者出错不影响其它图标 */
+    }
+  });
+}
+
+// 懒加载一次 7uuu 的角色图床映射（失败可在下次调用时重试）
+export function loadHostedIcons() {
+  if (hostedPromise) return hostedPromise;
+  hostedPromise = new Promise(resolve => {
+    if (typeof document === "undefined") {
+      resolve(false);
+      return;
+    }
+    if (window.HOSTED_ROLE_ICONS) {
+      buildHostedIndex(window.HOSTED_ROLE_ICONS);
+      notifyIconStatus();
+      resolve(true);
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = HOSTED_ICONS_SRC;
+    script.async = true;
+    script.onload = () => {
+      if (window.HOSTED_ROLE_ICONS) {
+        buildHostedIndex(window.HOSTED_ROLE_ICONS);
+        notifyIconStatus();
+        resolve(true);
+      } else {
+        hostedPromise = null;
+        resolve(false);
+      }
+    };
+    script.onerror = () => {
+      hostedPromise = null;
+      resolve(false);
+    };
+    document.head.appendChild(script);
+  });
+  return hostedPromise;
+}
+
+// 按角色 id 在 7uuu 图床里查直链（命中不了返回空串，交给后面的兜底来源）
+export function hostedIconUrl(role) {
+  if (!role || !role.id) return "";
+  const id = String(role.id);
+  const direct = hostedByKey.get(normalizeRoleId(id));
+  if (direct) return direct;
+  const withoutOld = id.replace(/old\d+$/, "");
+  return hostedByKey.get(normalizeRoleId(withoutOld)) || "";
+}
+
 // 内置图标：imageAlt 或去掉 old1 后缀的角色 id，缺失则返回空串（不抛错）
 function localIcon(role) {
   const id = role.imageAlt || String(role.id || "").replace(/old1$/, "");
@@ -121,8 +212,10 @@ export function reminderIconUrl(reminder, grimoire, roles) {
     roles && typeof roles.get === "function" ? roles.get(roleId) : null;
 
   if (grimoire && grimoire.forceWikiIcon) {
+    loadHostedIcons();
+    const hosted = role ? hostedIconUrl(role) : "";
     const wiki = role ? lookupWiki(grimoire.wikiIcons, role) : "";
-    const hit = firstOk([wiki, jsonImage]);
+    const hit = firstOk([hosted, wiki, jsonImage]);
     if (hit) return hit;
     return localIcon({ id: roleId, imageAlt: reminder.imageAlt });
   }
@@ -139,9 +232,11 @@ export function roleIconUrl(role, grimoire) {
   const jsonImage = role.image && imageOptIn ? role.image : "";
 
   if (grimoire && grimoire.forceWikiIcon) {
+    loadHostedIcons();
+    const hosted = hostedIconUrl(role);
     const wiki = lookupWiki(grimoire.wikiIcons, role);
-    // 优先级：图床直链 → 剧本 JSON 里的 image → 内置图标（内置图标可能只是 good/evil 通用占位）
-    const hit = firstOk([wiki, jsonImage]);
+    // 优先级：7uuu 统一图床 → BWIKI 图床 → 剧本 JSON 里的 image → 内置图标
+    const hit = firstOk([hosted, wiki, jsonImage]);
     if (hit) return hit;
     return localIcon(role);
   }
