@@ -106,6 +106,7 @@ const HOSTED_ICONS_SRC = "https://7uuu.me/script_tool/assets/script-tool/data.js
 
 let hostedPromise = null;
 const hostedByKey = new Map(); // 归一化后的角色 id -> 直链
+const hostedByName = new Map(); // 归一化后的中文角色名 -> 直链（优先使用）
 
 // 同一角色在两边可能只是书写方式不同：7uuu 用 `fortune_teller_gstone` / `lil_monsta_gstone`，
 // 我们用 `fortuneteller` / `lilmonstaold1`。这里只做「拼写归一化」判等，不做模糊匹配。
@@ -116,11 +117,48 @@ function normalizeRoleId(value) {
     .replace(/[^a-z0-9]/g, "");
 }
 
-function buildHostedIndex(raw) {
+// 中文名归一化：去空白、全角转半角、去「（旧）」后缀、小写
+function normalizeRoleName(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/\s+/g, "")
+    .replace(/（旧）/g, "")
+    .replace(/\(旧\)/g, "")
+    .toLowerCase();
+}
+
+// nameSource：id -> { n: 中文名 } 的字典（7uuu 的 SCRIPT_NIGHT_ORDER / CHARS）
+function buildHostedIndex(raw, nameSources) {
   hostedByKey.clear();
+  hostedByName.clear();
+  // 允许传入数组形式的角色表（如 7uuu 的 CHARS：每项含 id / n），统一转成 id -> { n }
+  const sources = (nameSources || []).map(src => {
+    if (Array.isArray(src)) {
+      const map = {};
+      src.forEach(item => {
+        if (item && item.id && item.n) map[item.id] = { n: item.n };
+      });
+      return map;
+    }
+    return src || {};
+  });
+  const nameOf = key => {
+    for (const src of sources) {
+      const rec = src && src[key];
+      if (rec && rec.n) return rec.n;
+    }
+    return "";
+  };
   Object.keys(raw || {}).forEach(key => {
     const url = raw[key];
     if (!url) return;
+    // 1) 中文名索引（优先）
+    const name = nameOf(key);
+    const normName = normalizeRoleName(name);
+    if (normName && !hostedByName.has(normName)) {
+      hostedByName.set(normName, url);
+    }
+    // 2) 角色 id 索引（兜底）
     const normalized = normalizeRoleId(key);
     if (normalized && !hostedByKey.has(normalized)) {
       hostedByKey.set(normalized, url);
@@ -147,7 +185,10 @@ export function loadHostedIcons() {
       return;
     }
     if (window.HOSTED_ROLE_ICONS) {
-      buildHostedIndex(window.HOSTED_ROLE_ICONS);
+      buildHostedIndex(window.HOSTED_ROLE_ICONS, [
+        window.SCRIPT_NIGHT_ORDER,
+        window.CHARS
+      ]);
       notifyIconStatus();
       resolve(true);
       return;
@@ -157,7 +198,10 @@ export function loadHostedIcons() {
     script.async = true;
     script.onload = () => {
       if (window.HOSTED_ROLE_ICONS) {
-        buildHostedIndex(window.HOSTED_ROLE_ICONS);
+        buildHostedIndex(window.HOSTED_ROLE_ICONS, [
+        window.SCRIPT_NIGHT_ORDER,
+        window.CHARS
+      ]);
         notifyIconStatus();
         resolve(true);
       } else {
@@ -174,9 +218,24 @@ export function loadHostedIcons() {
   return hostedPromise;
 }
 
-// 按角色 id 在 7uuu 图床里查直链（命中不了返回空串，交给后面的兜底来源）
+// 在 7uuu 图床里查直链：**先按中文名**，名字匹配不上再按角色 id（命中不了返回空串，交给后面的兜底来源）
 export function hostedIconUrl(role) {
-  if (!role || !role.id) return "";
+  if (!role) return "";
+  // 1) 中文名优先（7uuu 的 id 体系与我们不同，名字才是可靠的关联键）
+  const names = [];
+  const rawName = String(role.name || "").trim();
+  if (rawName) {
+    names.push(rawName);
+    // 「船长（山海百绘）」这类带括注的，再试去掉括注的主名
+    const base = rawName.replace(/（[^）]*）|\([^)]*\)/g, "").trim();
+    if (base && base !== rawName) names.push(base);
+  }
+  for (const n of names) {
+    const hit = hostedByName.get(normalizeRoleName(n));
+    if (hit) return hit;
+  }
+  // 2) 角色 id 兜底
+  if (!role.id) return "";
   const id = String(role.id);
   const direct = hostedByKey.get(normalizeRoleId(id));
   if (direct) return direct;
