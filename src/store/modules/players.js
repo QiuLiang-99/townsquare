@@ -295,6 +295,24 @@ const mutations = {
       }
     }
   },
+  /**
+   * 更新左上角「说书人」传奇令牌上的头像（fabled[0] 即 storyteller）。
+   * 说书人上传/更换头像后调用，避免头像只在开局时才读取一次。
+   */
+  setStorytellerImage(state, image) {
+    const st = state.fabled && state.fabled[0];
+    if (!st || st.id !== "storyteller") return;
+    st.image = avatarUrl(image);
+  },
+  /**
+   * 更新左上角「说书人」传奇令牌上的名字（fabled[0] 即 storyteller）。
+   */
+  setStorytellerName(state, name) {
+    const st = state.fabled && state.fabled[0];
+    if (!st || st.id !== "storyteller") return;
+    if (!name) return;
+    st.name = name;
+  },
   setFirstNight(state, firstNight) {
     state.firstNightOrder = firstNight;
   },

@@ -365,6 +365,11 @@ module.exports = store => {
           JSON.stringify(state.players.fabled)
         );
         break;
+      case "players/setStorytellerImage":
+      case "players/setStorytellerName":
+        // 说书人令牌头像/昵称变化后也写入本地，刷新后保持最新
+        localStorage.setItem("fabled", JSON.stringify(state.players.fabled));
+        break;
       case "players/addStToken":
       case "players/removeStToken":
       case "players/setStTokens":

@@ -384,7 +384,8 @@ app.post("/upload/avatar", (req, res) => {
     const safeId = playerId.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 40) || "anon";
     const fileName = `${safeId}.${ext}`;
     fs.writeFileSync(path.join(AVATAR_DIR, fileName), buf);
-    const avatarUrl = `/avatars/${fileName}`;
+    // 带上版本参数，避免浏览器继续用旧头像缓存（同一玩家重复上传会覆盖同名文件）
+    const avatarUrl = `/avatars/${fileName}?v=${Date.now()}`;
     log("avatar saved", fileName, buf.length, "bytes");
     return res.json({ status: "success", avatarUrl });
   } catch (e) {
@@ -539,7 +540,7 @@ app.get("/api/wiki-icons", async (req, res) => {
 });
 
 // 头像静态资源
-app.use("/avatars", express.static(AVATAR_DIR, { maxAge: "7d" }));
+app.use("/avatars", express.static(AVATAR_DIR, { maxAge: 0, etag: true, lastModified: true }));
 
 // 健康检查
 app.get("/healthz", (req, res) => {

@@ -2956,6 +2956,10 @@ export default store => {
         // 说书人改昵称 → 同步说书人名称到大厅；玩家改昵称 → 同步到自己座位
         if (session._isHost && state.session.sessionId) session._sendRoomMeta();
         session._sendPlayerNameToHost(payload);
+        // 说书人端：同步刷新左上角「说书人」令牌的名字并广播全场
+        if (!session._isSpectator) {
+          session._store.commit("players/setStorytellerName", payload);
+        }
         break;
       case "session/claimSeat":
         session.claimSeat(payload);
@@ -2963,6 +2967,10 @@ export default store => {
       case "session/updatePlayerAvatar":
         // 头像变更（上传成功 / 服务端回执）→ 若已入座则告知说书人刷新座位头像
         session._sendAvatarToHost(payload);
+        // 说书人端：同步刷新左上角「说书人」令牌的头像并广播全场
+        if (!session._isSpectator) {
+          session._store.commit("players/setStorytellerImage", payload);
+        }
         break;
       case "session/distributeRoles":
         if (payload) {
@@ -3026,6 +3034,14 @@ export default store => {
         session.sendOtherNight();
         break;
       case "players/setFabled":
+        session.sendFabled();
+        break;
+      case "players/setStorytellerImage":
+        // 说书人头像变化后，把 fabled 重新下发给全场
+        session.sendFabled();
+        break;
+      case "players/setStorytellerName":
+        // 说书人昵称变化后，把 fabled 重新下发给全场
         session.sendFabled();
         break;
       case "session/setMarkedPlayer":
